@@ -1,8 +1,7 @@
 --!strict
--- Placeholder riding HUD (temper meter, progress, messages). Plain on purpose:
--- replaced by the approved ChatGPT designs in Phase 5.
+-- Placeholder riding HUD: temper meter, progress, messages, leave button, end-of-run panel.
 
-local Players = game:GetService("Players")
+local UiKit = require(script.Parent.UiKit)
 
 local RideHud = {}
 RideHud.__index = RideHud
@@ -15,29 +14,18 @@ export type RideHud = typeof(setmetatable(
 		progressFill: Frame,
 		message: TextLabel,
 		hint: TextLabel,
+		leaveButton: TextButton,
+		endPanel: Frame,
+		againButton: TextButton,
+		returnButton: TextButton,
 		messageToken: number,
 	},
 	RideHud
 ))
 
-local FONT = Enum.Font.FredokaOne
 local CALM = Color3.fromRGB(110, 200, 90)
 local WARN = Color3.fromRGB(255, 170, 50)
 local DANGER = Color3.fromRGB(235, 70, 60)
-
-local function stroke(parent: GuiObject, thickness: number)
-	local s = Instance.new("UIStroke")
-	s.Thickness = thickness
-	s.Color = Color3.fromRGB(30, 30, 35)
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
-	s.Parent = parent
-end
-
-local function corner(parent: GuiObject)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(1, 0)
-	c.Parent = parent
-end
 
 local function bar(parent: Instance, name: string, y: number, height: number, color: Color3): Frame
 	local back = Instance.new("Frame")
@@ -45,10 +33,10 @@ local function bar(parent: Instance, name: string, y: number, height: number, co
 	back.AnchorPoint = Vector2.new(0.5, 0)
 	back.Position = UDim2.new(0.5, 0, 0, y)
 	back.Size = UDim2.new(0.4, 0, 0, height)
-	back.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+	back.BackgroundColor3 = UiKit.DARK
 	back.BackgroundTransparency = 0.35
 	back.Parent = parent
-	corner(back)
+	UiKit.corner(back, UDim.new(1, 0))
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
@@ -56,43 +44,54 @@ local function bar(parent: Instance, name: string, y: number, height: number, co
 	fill.BackgroundColor3 = color
 	fill.BorderSizePixel = 0
 	fill.Parent = back
-	corner(fill)
+	UiKit.corner(fill, UDim.new(1, 0))
 	return fill
 end
 
-local function label(parent: Instance, name: string, position: UDim2, size: UDim2, textSize: number): TextLabel
-	local l = Instance.new("TextLabel")
-	l.Name = name
-	l.AnchorPoint = Vector2.new(0.5, 0.5)
-	l.Position = position
-	l.Size = size
-	l.BackgroundTransparency = 1
-	l.Font = FONT
-	l.TextSize = textSize
-	l.TextColor3 = Color3.new(1, 1, 1)
-	l.Text = ""
-	l.Parent = parent
-	stroke(l, 2)
-	return l
-end
-
 function RideHud.new(): RideHud
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "RideHud"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
+	local gui = UiKit.screen("RideHud")
 
-	local temperLabel = label(gui, "TemperLabel", UDim2.new(0.5, 0, 0, 40), UDim2.new(0.4, 0, 0, 24), 22)
-	temperLabel.Text = "TEMPER"
+	local temperLabel = UiKit.label(gui, "TemperLabel", "TEMPER", 22)
+	temperLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	temperLabel.Position = UDim2.new(0.5, 0, 0, 40)
+	temperLabel.Size = UDim2.new(0.4, 0, 0, 24)
 	local temperFill = bar(gui, "Temper", 54, 22, CALM)
 	local progressFill = bar(gui, "Progress", 84, 8, Color3.fromRGB(255, 210, 70))
 
-	local message = label(gui, "Message", UDim2.fromScale(0.5, 0.35), UDim2.new(0.8, 0, 0, 80), 64)
+	local message = UiKit.label(gui, "Message", "", 64)
+	message.AnchorPoint = Vector2.new(0.5, 0.5)
+	message.Position = UDim2.fromScale(0.5, 0.33)
+	message.Size = UDim2.new(0.8, 0, 0, 80)
 	message.Visible = false
 
-	local hint = label(gui, "Hint", UDim2.new(0.5, 0, 1, -50), UDim2.new(0.9, 0, 0, 30), 24)
+	local hint = UiKit.label(gui, "Hint", "", 24)
+	hint.AnchorPoint = Vector2.new(0.5, 0.5)
+	hint.Position = UDim2.new(0.5, 0, 1, -50)
+	hint.Size = UDim2.new(0.9, 0, 0, 30)
 
-	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local leaveButton = UiKit.button(gui, "Leave", "◀ Sanctuary", UiKit.DARK, 20)
+	leaveButton.Position = UDim2.fromOffset(16, 70)
+	leaveButton.Size = UDim2.fromOffset(150, 40)
+	leaveButton.BackgroundTransparency = 0.3
+
+	local endPanel = Instance.new("Frame")
+	endPanel.Name = "EndPanel"
+	endPanel.AnchorPoint = Vector2.new(0.5, 0)
+	endPanel.Position = UDim2.fromScale(0.5, 0.45)
+	endPanel.Size = UDim2.fromOffset(440, 70)
+	endPanel.BackgroundTransparency = 1
+	endPanel.Visible = false
+	endPanel.Parent = gui
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 20)
+	layout.Parent = endPanel
+
+	local againButton = UiKit.button(endPanel, "RideAgain", "Ride again", UiKit.GREEN, 28)
+	againButton.Size = UDim2.fromOffset(200, 64)
+	local returnButton = UiKit.button(endPanel, "Return", "Back to Sanctuary", Color3.fromRGB(80, 140, 210), 24)
+	returnButton.Size = UDim2.fromOffset(200, 64)
 
 	return setmetatable({
 		gui = gui,
@@ -101,6 +100,10 @@ function RideHud.new(): RideHud
 		progressFill = progressFill,
 		message = message,
 		hint = hint,
+		leaveButton = leaveButton,
+		endPanel = endPanel,
+		againButton = againButton,
+		returnButton = returnButton,
 		messageToken = 0,
 	}, RideHud)
 end
@@ -149,6 +152,11 @@ function RideHud.showHint(self: RideHud, isTouch: boolean, duration: number)
 			self.hint.Visible = false
 		end
 	end)
+end
+
+function RideHud.setEndPanelVisible(self: RideHud, visible: boolean)
+	self.endPanel.Visible = visible
+	self.leaveButton.Visible = not visible
 end
 
 function RideHud.destroy(self: RideHud)

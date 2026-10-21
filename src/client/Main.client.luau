@@ -1,9 +1,12 @@
 --!strict
--- Starts a ride whenever the local character is seated on an animal's RiderSeat.
+-- Starts a ride whenever the local character is seated on an animal's RiderSeat
+-- (only happens after the player uses the Safari Gate), and runs the sanctuary-side UI.
 
 local Players = game:GetService("Players")
 
+local OnboardingController = require(script.Parent.OnboardingController)
 local RideController = require(script.Parent.RideController)
+local SanctuaryView = require(script.Parent.SanctuaryView)
 
 local player = Players.LocalPlayer
 local current: RideController.RideController? = nil
@@ -17,11 +20,9 @@ end
 
 local function onSeatChanged(humanoid: Humanoid)
 	local seat = humanoid.SeatPart
+	stopRide()
 	if seat and seat.Name == "RiderSeat" and seat.Parent and seat.Parent:IsA("Model") then
-		stopRide()
 		current = RideController.new(seat.Parent, humanoid)
-	else
-		stopRide()
 	end
 end
 
@@ -38,5 +39,8 @@ end
 
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then
-	onCharacterAdded(player.Character)
+	task.spawn(onCharacterAdded, player.Character)
 end
+
+task.spawn(OnboardingController.start)
+task.spawn(SanctuaryView.start)

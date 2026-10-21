@@ -5,6 +5,7 @@
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -45,6 +46,7 @@ local TAP_MAX_TIME = 0.25
 local TAP_MAX_MOVE = 14 -- pixels
 local TOUCH_SCREEN_SPAN = 1.1 -- a full-screen-width drag moves this many track widths
 local LAUNCH_ACCELERATION = 60 -- studs/s² when leaving the start line
+local END_PANEL_DELAY = 0.8
 
 local LEG_PHASES = {
 	-- Bounding gallop: front pair together, back pair half a cycle later, with a slight left/right offset.
@@ -67,12 +69,12 @@ local function moveToward(current: number, target: number, maxDelta: number): nu
 	return math.max(current - maxDelta, target)
 end
 
-local function buildObstacles(): { Obstacle }
+local function buildObstacles(course: CourseConfig.Course): { Obstacle }
 	local list: { Obstacle } = {}
-	for _, placement in CourseConfig.obstacles do
+	for _, placement in course.obstacles do
 		local kind = CourseConfig.obstacleKinds[placement.kind]
 		if kind then
-			local width = if kind.fullWidth then CourseConfig.trackWidth else kind.size.X
+			local width = if kind.fullWidth then course.trackWidth else kind.size.X
 			local x = if kind.fullWidth then 0 else placement.x
 			table.insert(list, {
 				dMin = placement.distance - kind.size.Z / 2,
@@ -84,19 +86,6 @@ local function buildObstacles(): { Obstacle }
 		end
 	end
 	return list
-end
-
-local function getControls(): any?
-	local playerScripts = Players.LocalPlayer:WaitForChild("PlayerScripts")
-	local module = playerScripts:WaitForChild("PlayerModule", 5)
-	if not module then
-		return nil
-	end
-	local ok, playerModule = pcall(require, module)
-	if not ok then
-		return nil
-	end
-	return (playerModule :: any):GetControls()
 end
 
 local function makeDust(root: BasePart, rootHeight: number): (Attachment, ParticleEmitter)
@@ -127,18 +116,23 @@ function RideController.new(model: Model, humanoid: Humanoid)
 	local rootHeightAttr = model:GetAttribute("RootHeight")
 	local rootHeight = if typeof(rootHeightAttr) == "number" then rootHeightAttr else 4
 	local root = model.PrimaryPart :: BasePart
+	local courseId = model:GetAttribute("CourseId")
+	local course = CourseConfig.courses[if typeof(courseId) == "string" then courseId else CourseConfig.defaultCourse]
 
 	local self = setmetatable({}, RideController)
 	self.model = model
 	self.root = root
 	self.humanoid = humanoid
 	self.stats = stats :: AnimalStats
+	self.course = course
 	self.rootHeight = rootHeight
-	self.obstacles = buildObstacles()
+	self.obstacles = buildObstacles(course)
 	self.legs = {} :: { Leg }
 	self.connections = {} :: { RBXScriptConnection }
 	self.hud = RideHud.new()
-	self.controls = getControls()
+	-- Ride inputs are bound at high priority and seated characters ignore walk input, so the only
+	-- default control to suppress is the on-screen touch joystick/jump button.
+	self.touchControlsWereEnabled = GuiService.TouchControlsEnabled
 	self.camera = Workspace.CurrentCamera
 	self.dustAttachment, self.dust = makeDust(root, rootHeight)
 
@@ -169,9 +163,7 @@ function RideController.new(model: Model, humanoid: Humanoid)
 		end
 	end
 
-	if self.controls then
-		self.controls:Disable()
-	end
+	GuiService.TouchControlsEnabled = false
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
 
 	self:bindInput()
@@ -207,6 +199,7 @@ function RideController.reset(self: RideController)
 	self.state = "countdown"
 	self.timer = CourseConfig.countdownTime
 	self.touchTargetX = nil
+	self.hud:setEndPanelVisible(false)
 	self.hud:showMessage("Ready...")
 	self.hud:setTemper(0, self.stats.temperWarningAt)
 	self.hud:setProgress(0)
@@ -235,6 +228,23 @@ function RideController.bindInput(self: RideController)
 		end
 		return Enum.ContextActionResult.Sink
 	end
+
+	local returnRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ReturnToSanctuary") :: RemoteEvent
+	local function leave()
+		returnRemote:FireServer()
+	end
+	table.insert(self.connections, self.hud.leaveButton.Activated:Connect(leave))
+	table.insert(self.connections, self.hud.returnButton.Activated:Connect(leave))
+	table.insert(self.connections, self.hud.againButton.Activated:Connect(function()
+		if self.state == "ended" then
+			self:reset()
+		end
+	end))
+	table.insert(self.connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if not gameProcessed and input.KeyCode == Enum.KeyCode.R and self.state == "ended" then
+			self:reset()
+		end
+	end))
 
 	local priority = Enum.ContextActionPriority.High.Value
 	ContextActionService:BindActionAtPriority(ACTION_LEFT, handler, false, priority, Enum.KeyCode.A, Enum.KeyCode.Left, Enum.KeyCode.DPadLeft)
@@ -268,7 +278,7 @@ function RideController.bindInput(self: RideController)
 			self.touchMoved = true
 		end
 		if self.touchMoved then
-			local studsPerPixel = CourseConfig.trackWidth * TOUCH_SCREEN_SPAN / self.camera.ViewportSize.X
+			local studsPerPixel = self.course.trackWidth * TOUCH_SCREEN_SPAN / self.camera.ViewportSize.X
 			self.touchTargetX = self.touchStartTargetX + dx * studsPerPixel
 		end
 	end))
@@ -286,9 +296,13 @@ end
 
 function RideController.endRun(self: RideController, text: string, shake: number)
 	self.state = "ended"
-	self.timer = CourseConfig.restartDelay
 	self.shake = shake
 	self.hud:showMessage(text)
+	task.delay(END_PANEL_DELAY, function()
+		if self.state == "ended" and self.hud.gui.Parent then
+			self.hud:setEndPanelVisible(true)
+		end
+	end)
 end
 
 function RideController.jumpHeight(self: RideController): number
@@ -334,7 +348,7 @@ function RideController.updateSteering(self: RideController, dt: number)
 	self.steerVelocity = moveToward(self.steerVelocity, desired, acceleration * dt)
 	self.x += self.steerVelocity * dt
 
-	local limit = CourseConfig.trackWidth / 2 - stats.hitboxHalfWidth - 0.5
+	local limit = self.course.trackWidth / 2 - stats.hitboxHalfWidth - 0.5
 	if math.abs(self.x) > limit then
 		self.x = math.clamp(self.x, -limit, limit)
 		self.steerVelocity = 0
@@ -382,7 +396,7 @@ function RideController.step(self: RideController, dt: number)
 			self.speed = 0
 			self.dust:Emit(25)
 			self:endRun("Crashed!", 0.4)
-		elseif self.distance >= CourseConfig.length then
+		elseif self.distance >= self.course.length then
 			self:endRun(string.format("Finished!  %.1fs", self.elapsed), 0)
 		elseif self.temper >= 1 then
 			self.speed = 0
@@ -392,17 +406,13 @@ function RideController.step(self: RideController, dt: number)
 		self.speed = moveToward(self.speed, 0, 80 * dt)
 		self.distance += self.speed * dt
 		self.jumpTime = nil
-		self.timer -= dt
-		if self.timer <= 0 then
-			self:reset()
-		end
 	end
 
 	self:updateSteering(dt)
 	self:applyPose()
 
 	self.hud:setTemper(self.temper, stats.temperWarningAt)
-	self.hud:setProgress(self.distance / CourseConfig.length)
+	self.hud:setProgress(self.distance / self.course.length)
 end
 
 -- Places the animal and animates the gait. The gait phase comes from distance travelled,
@@ -433,7 +443,7 @@ function RideController.applyPose(self: RideController)
 		yaw += math.sin(self.elapsed * 35) * 0.08 * restless
 	end
 
-	local origin = CourseConfig.origin
+	local origin = self.course.origin
 	local position = Vector3.new(origin.X + self.x, CourseConfig.groundY + self.rootHeight + self:jumpHeight() + bob, origin.Z - self.distance)
 	self.root.CFrame = CFrame.new(position) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, roll)
 	self.root.AssemblyLinearVelocity = Vector3.new(self.steerVelocity, 0, -self.speed)
@@ -460,7 +470,7 @@ function RideController.updateCamera(self: RideController, dt: number)
 	self.fov += (68 + 16 * speedFraction - self.fov) * damp(3, dt)
 
 	local back = 17 + 6 * speedFraction
-	local position = Vector3.new(CourseConfig.origin.X + self.cameraX, self.cameraY, rootPosition.Z + back)
+	local position = Vector3.new(self.course.origin.X + self.cameraX, self.cameraY, rootPosition.Z + back)
 
 	-- Small rhythmic rumble at speed plus crash shake.
 	local phase = self.distance / stats.strideLength * 2 * math.pi
@@ -472,7 +482,7 @@ function RideController.updateCamera(self: RideController, dt: number)
 	end
 
 	local lookAhead = 28 + 10 * speedFraction
-	local lookAt = Vector3.new(CourseConfig.origin.X + self.cameraX * 0.6 + self.x * 0.4, baseY + 1, rootPosition.Z - lookAhead)
+	local lookAt = Vector3.new(self.course.origin.X + self.cameraX * 0.6 + self.x * 0.4, baseY + 1, rootPosition.Z - lookAhead)
 	camera.CFrame = CFrame.lookAt(position, lookAt) * CFrame.Angles(0, 0, -self.steerVelocity * 0.0035)
 	camera.FieldOfView = self.fov
 end
@@ -496,9 +506,7 @@ function RideController.destroy(self: RideController)
 
 	self.camera.CameraType = Enum.CameraType.Custom
 	self.camera.FieldOfView = BASE_FOV
-	if self.controls then
-		self.controls:Enable()
-	end
+	GuiService.TouchControlsEnabled = self.touchControlsWereEnabled
 	if self.humanoid.Parent then
 		self.humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 	end
