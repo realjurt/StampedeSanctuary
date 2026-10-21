@@ -61,22 +61,30 @@ local function buildGround(parent: Instance)
 	local savannah = makePart(parent, "Savannah", Vector3.new(500, 1, length + 500), courseCFrame(centerDistance, 0, -0.55), COLORS.savannah)
 	savannah.CanTouch = false
 
-	local half = (CourseConfig.laneCount - 1) / 2
-	for lane = -half, half do
-		local color = if lane % 2 == 0 then COLORS.laneA else COLORS.laneB
-		local strip = makePart(
-			parent,
-			"Lane",
-			Vector3.new(CourseConfig.laneWidth, 1, trackLength),
-			courseCFrame(centerDistance, lane * CourseConfig.laneWidth, -0.5),
-			color
-		)
-		strip.CanTouch = false
+	local width = CourseConfig.trackWidth
+	local track = makePart(parent, "Track", Vector3.new(width, 1, trackLength), courseCFrame(centerDistance, 0, -0.5), COLORS.laneA)
+	track.CanTouch = false
+
+	-- Speed cues: cross bands on the track and grass tufts hugging both edges rush past the rider.
+	local bands = Instance.new("Folder")
+	bands.Name = "SpeedCues"
+	bands.Parent = parent
+	for distance = -40, length + 40, 12 do
+		decor(makePart(bands, "Band", Vector3.new(width, 0.05, 5), courseCFrame(distance, 0, 0.01), COLORS.laneB))
+	end
+
+	local rng = Random.new(7)
+	for distance = -40, length + 40, 5 do
+		for _, side in { -1, 1 } do
+			local x = side * (width / 2 + rng:NextNumber(0.5, 3.5))
+			local height = rng:NextNumber(0.6, 1.4)
+			decor(makePart(bands, "Tuft", Vector3.new(1.2, height, 1.2), courseCFrame(distance + rng:NextNumber(-2, 2), x, height / 2), COLORS.bush))
+		end
 	end
 end
 
 local function buildLines(parent: Instance)
-	local width = CourseConfig.laneCount * CourseConfig.laneWidth
+	local width = CourseConfig.trackWidth
 	decor(makePart(parent, "StartLine", Vector3.new(width, 0.1, 1.5), courseCFrame(0, 0, 0.02), COLORS.startLine))
 	decor(makePart(parent, "FinishLine", Vector3.new(width, 0.1, 2), courseCFrame(CourseConfig.length, 0, 0.02), COLORS.finish))
 
@@ -88,19 +96,17 @@ local function buildLines(parent: Instance)
 end
 
 local function buildObstacles(parent: Instance)
-	local half = (CourseConfig.laneCount - 1) / 2
 	for _, placement in CourseConfig.obstacles do
 		local kind = CourseConfig.obstacleKinds[placement.kind]
 		if not kind then
 			warn(`CourseBuilder: unknown obstacle kind "{placement.kind}"`)
 			continue
 		end
-		local lane = math.clamp(placement.lane, -half, half)
-		local x = if kind.allLanes then 0 else lane * CourseConfig.laneWidth
+		local x = if kind.fullWidth then 0 else placement.x
 		local size = kind.size
 
 		if placement.kind == "Log" then
-			local log = makePart(parent, "Log", Vector3.new(size.X, size.Y, size.Y), courseCFrame(placement.distance, x, size.Y / 2), kind.color)
+			local log = makePart(parent, "Log", Vector3.new(CourseConfig.trackWidth, size.Y, size.Y), courseCFrame(placement.distance, x, size.Y / 2), kind.color)
 			log.Shape = Enum.PartType.Cylinder
 			decor(log)
 		else
@@ -121,7 +127,7 @@ end
 
 local function buildScenery(parent: Instance)
 	local rng = Random.new(42)
-	local trackHalf = CourseConfig.laneCount * CourseConfig.laneWidth / 2
+	local trackHalf = CourseConfig.trackWidth / 2
 
 	for distance = -40, CourseConfig.length + 80, 45 do
 		for _, side in { -1, 1 } do

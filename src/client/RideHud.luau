@@ -141,8 +141,8 @@ end
 
 function RideHud.showHint(self: RideHud, isTouch: boolean, duration: number)
 	self.hint.Text = if isTouch
-		then "Swipe left/right to steer  ·  Tap or swipe up to jump"
-		else "A / D or ← / → to steer  ·  Space to jump"
+		then "Drag left/right to steer  ·  Tap to jump"
+		else "Hold A / D or ← / → to steer  ·  Space to jump"
 	self.hint.Visible = true
 	task.delay(duration, function()
 		if self.hint.Parent then
