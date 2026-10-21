@@ -5,6 +5,7 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 export type PlayerData = {
 	version: number,
@@ -23,7 +24,8 @@ type Profile = {
 
 local PlayerDataService = {}
 
-local STORE_NAME = "PlayerData_v1"
+-- Studio playtests use their own store so testing (including resets) never touches live player data.
+local STORE_NAME = if RunService:IsStudio() then "PlayerData_v1_Studio" else "PlayerData_v1"
 local DATA_VERSION = 1
 local LOAD_ATTEMPTS = 3
 

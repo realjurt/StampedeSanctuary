@@ -7,11 +7,17 @@ local Players = game:GetService("Players")
 local OnboardingController = require(script.Parent.OnboardingController)
 local RideController = require(script.Parent.RideController)
 local SanctuaryView = require(script.Parent.SanctuaryView)
+local TutorialDirector = require(script.Parent.TutorialDirector)
 
 local player = Players.LocalPlayer
 local current: RideController.RideController? = nil
+local tutorial: TutorialDirector.TutorialDirector? = nil
 
 local function stopRide()
+	if tutorial then
+		tutorial:destroy()
+		tutorial = nil
+	end
 	if current then
 		current:destroy()
 		current = nil
@@ -22,7 +28,11 @@ local function onSeatChanged(humanoid: Humanoid)
 	local seat = humanoid.SeatPart
 	stopRide()
 	if seat and seat.Name == "RiderSeat" and seat.Parent and seat.Parent:IsA("Model") then
-		current = RideController.new(seat.Parent, humanoid)
+		local ride = RideController.new(seat.Parent, humanoid)
+		current = ride
+		if ride.course.tutorial then
+			tutorial = TutorialDirector.new(ride)
+		end
 	end
 end
 

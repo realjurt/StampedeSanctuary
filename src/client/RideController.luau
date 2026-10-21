@@ -47,6 +47,7 @@ local TAP_MAX_MOVE = 14 -- pixels
 local TOUCH_SCREEN_SPAN = 1.1 -- a full-screen-width drag moves this many track widths
 local LAUNCH_ACCELERATION = 60 -- studs/s² when leaving the start line
 local END_PANEL_DELAY = 0.8
+local RESPAWN_COUNTDOWN = 0.7
 
 local LEG_PHASES = {
 	-- Bounding gallop: front pair together, back pair half a cycle later, with a slight left/right offset.
@@ -125,6 +126,13 @@ function RideController.new(model: Model, humanoid: Humanoid)
 	self.humanoid = humanoid
 	self.stats = stats :: AnimalStats
 	self.course = course
+	self.speedMultiplier = course.speedMultiplier or 1
+	self.temperEnabled = course.temperEnabled ~= false
+	-- Optional hooks (used by TutorialDirector). Returning true from onCrash/onFinish means the hook
+	-- handled it, so the default end-of-run panel is skipped.
+	self.onCrash = nil :: (() -> boolean)?
+	self.onFinish = nil :: (() -> boolean)?
+	self.onStep = nil :: ((dt: number) -> ())?
 	self.rootHeight = rootHeight
 	self.obstacles = buildObstacles(course)
 	self.legs = {} :: { Leg }
@@ -169,7 +177,7 @@ function RideController.new(model: Model, humanoid: Humanoid)
 	self:bindInput()
 	self:reset()
 
-	if not hintShown then
+	if not hintShown and not course.tutorial then
 		hintShown = true
 		self.hud:showHint(UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled, HINT_DURATION)
 	end
@@ -386,18 +394,29 @@ function RideController.step(self: RideController, dt: number)
 		self.elapsed += dt
 		local ramp = math.min(self.elapsed / stats.speedRampTime, 1)
 		local eased = 1 - (1 - ramp) ^ 2
-		local targetSpeed = stats.startSpeed + (stats.cruiseSpeed - stats.startSpeed) * eased
+		local targetSpeed = (stats.startSpeed + (stats.cruiseSpeed - stats.startSpeed) * eased) * self.speedMultiplier
 		self.speed = moveToward(self.speed, targetSpeed, LAUNCH_ACCELERATION * dt)
 		self.distance += self.speed * dt
-		self.temper += dt / stats.temperDuration
+		if self.temperEnabled then
+			self.temper += dt / stats.temperDuration
+		end
 		self:updateJump(dt)
 
 		if self:checkCollisions() then
 			self.speed = 0
 			self.dust:Emit(25)
-			self:endRun("Crashed!", 0.4)
+			if self.onCrash and self.onCrash() then
+				self.state = "ended"
+				self.shake = 0.4
+			else
+				self:endRun("Crashed!", 0.4)
+			end
 		elseif self.distance >= self.course.length then
-			self:endRun(string.format("Finished!  %.1fs", self.elapsed), 0)
+			if self.onFinish and self.onFinish() then
+				self.state = "ended"
+			else
+				self:endRun(string.format("Finished!  %.1fs", self.elapsed), 0)
+			end
 		elseif self.temper >= 1 then
 			self.speed = 0
 			self:endRun("Bucked off!", 0.3)
@@ -411,8 +430,27 @@ function RideController.step(self: RideController, dt: number)
 	self:updateSteering(dt)
 	self:applyPose()
 
-	self.hud:setTemper(self.temper, stats.temperWarningAt)
+	if self.temperEnabled then
+		self.hud:setTemper(self.temper, stats.temperWarningAt)
+	end
 	self.hud:setProgress(self.distance / self.course.length)
+	if self.onStep then
+		self.onStep(dt)
+	end
+end
+
+-- Restart from a checkpoint distance after a short "Ready" beat; elapsed time keeps counting.
+function RideController.respawnAt(self: RideController, distance: number, message: string)
+	self.distance = distance
+	self.x = 0
+	self.steerVelocity = 0
+	self.speed = 0
+	self.jumpTime = nil
+	self.jumpBufferedAt = nil
+	self.state = "countdown"
+	self.timer = RESPAWN_COUNTDOWN
+	self.hud:setEndPanelVisible(false)
+	self.hud:showMessage(message)
 end
 
 -- Places the animal and animates the gait. The gait phase comes from distance travelled,

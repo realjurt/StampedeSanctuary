@@ -22,10 +22,20 @@ type Run = {
 local SafariService = {}
 
 local TELEPORT_HOLD = 0.3
+local TUTORIAL_COURSE = "Tutorial"
 
 local runs: { [Player]: Run } = {}
 local animalsFolder: Folder
 local sanctuarySpawn: CFrame
+
+-- Read-only view of a player's active run, for reward validation.
+function SafariService.getRun(player: Player): (string?, number?)
+	local run = runs[player]
+	if not run then
+		return nil, nil
+	end
+	return run.courseId, os.clock() - run.startedAt
+end
 
 local function cleanup(player: Player): boolean
 	local run = runs[player]
@@ -121,7 +131,12 @@ function SafariService.start(startPrompt: ProximityPrompt, spawnCFrame: CFrame)
 	animalsFolder.Parent = Workspace
 
 	startPrompt.Triggered:Connect(function(player)
-		SafariService.startRun(player, CourseConfig.defaultCourse)
+		local data = PlayerDataService.get(player)
+		if not data then
+			return
+		end
+		local tutorialNext = not data.tutorialCompleted and not data.onboardingDismissed
+		SafariService.startRun(player, if tutorialNext then TUTORIAL_COURSE else CourseConfig.defaultCourse)
 	end)
 	Net.on("ReturnToSanctuary", 0.5, returnToSanctuary)
 	Players.PlayerRemoving:Connect(cleanup)

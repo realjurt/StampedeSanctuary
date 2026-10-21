@@ -123,6 +123,14 @@ function RideHud.setTemper(self: RideHud, fraction: number, warningAt: number)
 	end
 end
 
+-- Tutorial variant of the top meter: shows befriending progress instead of temper.
+function RideHud.setBefriending(self: RideHud, fraction: number, animalName: string)
+	fraction = math.clamp(fraction, 0, 1)
+	self.temperFill.Size = UDim2.fromScale(fraction, 1)
+	self.temperFill.BackgroundColor3 = Color3.fromRGB(255, 140, 180)
+	self.temperLabel.Text = string.format("BEFRIENDING %s  %d%%", string.upper(animalName), math.floor(fraction * 100 + 0.5))
+end
+
 function RideHud.setProgress(self: RideHud, fraction: number)
 	self.progressFill.Size = UDim2.fromScale(math.clamp(fraction, 0, 1), 1)
 end

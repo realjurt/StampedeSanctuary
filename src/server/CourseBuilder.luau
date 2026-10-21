@@ -114,6 +114,12 @@ local function buildObstacles(course: Course, parent: Instance)
 			local log = makePart(parent, placement.kind, Vector3.new(course.trackWidth, size.Y, size.Y), courseCFrame(course, placement.distance, x, size.Y / 2), kind.color)
 			log.Shape = Enum.PartType.Cylinder
 			decor(log)
+			if course.tutorial then
+				-- Jump cue: bright strip on the ground just before the log.
+				local strip = makePart(parent, "JumpStrip", Vector3.new(course.trackWidth, 0.06, 2.5), courseCFrame(course, placement.distance - 10, 0, 0.03), Color3.fromRGB(255, 220, 60))
+				strip.Material = Enum.Material.Neon
+				decor(strip)
+			end
 		else
 			decor(makePart(parent, placement.kind, size, courseCFrame(course, placement.distance, x, size.Y / 2), kind.color))
 			-- Smaller cap block gives the voxel rock a chunkier silhouette.

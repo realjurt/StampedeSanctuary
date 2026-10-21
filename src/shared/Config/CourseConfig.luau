@@ -14,11 +14,29 @@ export type ObstaclePlacement = {
 	kind: string,
 }
 
+export type TutorialSection = {
+	id: string,
+	start: number, -- distance where the section (and its retry checkpoint) begins
+	prompt: string,
+	touchPrompt: string?,
+	enabled: boolean?, -- false = reserved for a later milestone
+}
+
+export type TutorialSpec = {
+	sections: { TutorialSection },
+	treats: { { distance: number, x: number } },
+	-- Befriending points; reaching the finish always completes the meter.
+	points: { steer: number, treat: number, obstacle: { [string]: number } },
+}
+
 export type Course = {
 	origin: Vector3,
 	length: number,
 	trackWidth: number,
 	obstacles: { ObstaclePlacement },
+	speedMultiplier: number?,
+	temperEnabled: boolean?,
+	tutorial: TutorialSpec?,
 }
 
 local CourseConfig = {
@@ -34,6 +52,45 @@ local CourseConfig = {
 	} :: { [string]: ObstacleKind },
 
 	courses = {
+		Tutorial = {
+			origin = Vector3.new(600, 0, 0),
+			length = 520,
+			trackWidth = 44,
+			speedMultiplier = 0.75,
+			temperEnabled = false,
+			obstacles = {
+				{ distance = 190, x = 0, kind = "Rock" },
+				{ distance = 225, x = -12, kind = "Rock" },
+				{ distance = 255, x = 10, kind = "Rock" },
+				{ distance = 285, x = -4, kind = "Rock" },
+				{ distance = 350, x = 0, kind = "Log" },
+				{ distance = 405, x = 0, kind = "Log" },
+			},
+			tutorial = {
+				sections = {
+					{ id = "Steer", start = 0, prompt = "Steer with A / D  (or ← / →)", touchPrompt = "Drag left and right to steer" },
+					{ id = "Dodge", start = 150, prompt = "Dodge the rocks!" },
+					{ id = "Jump", start = 310, prompt = "Press Space to jump the logs!", touchPrompt = "Tap to jump the logs!" },
+					{ id = "Switch", start = 440, prompt = "Leap onto another animal!", enabled = false },
+					{ id = "Finish", start = 440, prompt = "Almost friends — reach the finish!" },
+				},
+				treats = {
+					{ distance = 30, x = 0 },
+					{ distance = 40, x = 7 },
+					{ distance = 50, x = 13 },
+					{ distance = 60, x = 13 },
+					{ distance = 70, x = 7 },
+					{ distance = 80, x = 0 },
+					{ distance = 90, x = -7 },
+					{ distance = 100, x = -13 },
+					{ distance = 110, x = -13 },
+					{ distance = 120, x = -7 },
+					{ distance = 130, x = 0 },
+					{ distance = 140, x = 0 },
+				},
+				points = { steer = 15, treat = 1.5, obstacle = { Rock = 6, Log = 12 } },
+			},
+		},
 		Savannah = {
 			origin = Vector3.new(0, 0, 0),
 			length = 950,

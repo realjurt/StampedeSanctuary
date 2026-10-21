@@ -22,7 +22,7 @@ local function isNewPlayer(): boolean
 	return not flag("TutorialCompleted") and not flag("OnboardingDismissed") and not flag("StarterZebraUnlocked")
 end
 
-local function canSkip(): boolean
+local function tutorialIsNext(): boolean
 	return not flag("TutorialCompleted") and not flag("OnboardingDismissed")
 end
 
@@ -30,7 +30,7 @@ local function goalText(): string
 	if flag("StarterZebraUnlocked") then
 		return "Goal: Ride the safari and discover new animals"
 	end
-	return "Goal: Enter the Safari Gate to find your first animal"
+	return "▶ 1. Enter the Safari Gate\n    2. Befriend a wild zebra\n    3. Bring it home to your empty habitat"
 end
 
 local function buildIntroCard(gui: ScreenGui, onGo: () -> (), onSkip: () -> ()): Frame
@@ -54,7 +54,7 @@ local function buildIntroCard(gui: ScreenGui, onGo: () -> (), onSkip: () -> ()):
 	title.Position = UDim2.fromOffset(20, 18)
 	title.Size = UDim2.new(1, -40, 0, 44)
 
-	local body = UiKit.label(card, "Body", "Ride wild animals, discover new species, and build your own animal sanctuary.", 24)
+	local body = UiKit.label(card, "Body", "Ride wild animals, befriend them, and bring them home. Your first habitat is empty — let's find it a zebra!", 24)
 	body.Position = UDim2.fromOffset(30, 72)
 	body.Size = UDim2.new(1, -60, 0, 90)
 
@@ -113,9 +113,11 @@ function OnboardingController.start()
 	goal.AnchorPoint = Vector2.new(0, 0)
 	goal.Position = UDim2.fromOffset(16, 70)
 	goal.Size = UDim2.fromOffset(0, 30)
-	goal.AutomaticSize = Enum.AutomaticSize.X
+	goal.AutomaticSize = Enum.AutomaticSize.XY
 	goal.TextWrapped = false
 	goal.TextXAlignment = Enum.TextXAlignment.Left
+	goal.TextYAlignment = Enum.TextYAlignment.Top
+	local startPrompt = anchor:WaitForChild("StartPrompt") :: ProximityPrompt
 
 	local arrow: BillboardGui? = nil
 	local bounce: RBXScriptConnection? = nil
@@ -128,7 +130,9 @@ function OnboardingController.start()
 			card = nil
 		end
 		-- Client-side only: hides the prompt for players who can't use it (the server re-checks anyway).
-		skipPrompt.Enabled = canSkip()
+		skipPrompt.Enabled = tutorialIsNext()
+		startPrompt.ActionText = if tutorialIsNext() then "Start Tutorial Safari" else "Start Safari"
+		startPrompt.ObjectText = if tutorialIsNext() then "Befriend your first zebra" else "Safari Gate"
 		local wantArrow = not flag("StarterZebraUnlocked") and not flag("InSafari")
 		if wantArrow and not arrow then
 			arrow, bounce = buildGateArrow(anchor)
