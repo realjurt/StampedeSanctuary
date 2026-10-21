@@ -1,6 +1,7 @@
 --!strict
--- Client-driven arcade riding (Decisions D-002, D-007): auto-run forward with a speed ramp,
--- free horizontal steering, jump, temper, obstacle checks, speed-reactive camera, distance-tied gallop.
+-- Client-driven arcade riding (D-007, D-016): auto-run forward with a speed ramp, free horizontal
+-- steering, jump, temper, obstacle checks, speed-reactive camera. The mount is a client-side
+-- AnimalAgent with the rider welded on.
 
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
@@ -10,26 +11,10 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local AnimalConfig = require(ReplicatedStorage.Shared.Config.AnimalConfig)
 local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
+local AnimalAgent = require(script.Parent.AnimalAgent)
+local CourseObstacles = require(script.Parent.CourseObstacles)
 local RideHud = require(script.Parent.RideHud)
-
-type AnimalStats = AnimalConfig.AnimalStats
-
-type Obstacle = {
-	dMin: number,
-	dMax: number,
-	xMin: number,
-	xMax: number,
-	height: number,
-}
-
-type Leg = {
-	weld: Weld,
-	baseC0: CFrame,
-	phaseOffset: number,
-	isFront: boolean,
-}
 
 local RideController = {}
 RideController.__index = RideController
@@ -49,13 +34,7 @@ local LAUNCH_ACCELERATION = 60 -- studs/s² when leaving the start line
 local END_PANEL_DELAY = 0.8
 local RESPAWN_COUNTDOWN = 0.7
 
-local LEG_PHASES = {
-	-- Bounding gallop: front pair together, back pair half a cycle later, with a slight left/right offset.
-	LegFL = { offset = 0, front = true },
-	LegFR = { offset = 0.35, front = true },
-	LegBL = { offset = math.pi, front = false },
-	LegBR = { offset = math.pi + 0.35, front = false },
-}
+local STARTING_SPECIES = "Zebra"
 
 local hintShown = false
 
@@ -70,26 +49,7 @@ local function moveToward(current: number, target: number, maxDelta: number): nu
 	return math.max(current - maxDelta, target)
 end
 
-local function buildObstacles(course: CourseConfig.Course): { Obstacle }
-	local list: { Obstacle } = {}
-	for _, placement in course.obstacles do
-		local kind = CourseConfig.obstacleKinds[placement.kind]
-		if kind then
-			local width = if kind.fullWidth then course.trackWidth else kind.size.X
-			local x = if kind.fullWidth then 0 else placement.x
-			table.insert(list, {
-				dMin = placement.distance - kind.size.Z / 2,
-				dMax = placement.distance + kind.size.Z / 2,
-				xMin = x - width / 2,
-				xMax = x + width / 2,
-				height = kind.size.Y,
-			})
-		end
-	end
-	return list
-end
-
-local function makeDust(root: BasePart, rootHeight: number): (Attachment, ParticleEmitter)
+local function makeDust(root: BasePart, rootHeight: number): ParticleEmitter
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "DustAttachment"
 	attachment.Position = Vector3.new(0, -rootHeight + 0.3, 1.5)
@@ -108,23 +68,38 @@ local function makeDust(root: BasePart, rootHeight: number): (Attachment, Partic
 	dust.Acceleration = Vector3.new(0, 4, 0)
 	dust.Rate = 0
 	dust.Parent = attachment
-	return attachment, dust
+	return dust
 end
 
-function RideController.new(model: Model, humanoid: Humanoid)
-	local animalId = model:GetAttribute("AnimalId")
-	local stats = AnimalConfig[if typeof(animalId) == "string" then animalId else "Zebra"]
-	local rootHeightAttr = model:GetAttribute("RootHeight")
-	local rootHeight = if typeof(rootHeightAttr) == "number" then rootHeightAttr else 4
-	local root = model.PrimaryPart :: BasePart
-	local courseId = model:GetAttribute("CourseId")
-	local course = CourseConfig.courses[if typeof(courseId) == "string" then courseId else CourseConfig.defaultCourse]
+-- Welds the rider's character onto the mount's saddle. The mount exists only on this client; the
+-- character is client-owned, so its movement still replicates to the server and others (D-016).
+local function attachRider(agent: AnimalAgent.AnimalAgent, humanoid: Humanoid): WeldConstraint?
+	local character = humanoid.Parent
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not rootPart then
+		return nil
+	end
+	humanoid.Sit = true
+	rootPart.CFrame = agent.root.CFrame * CFrame.new(0, agent.riderOffset, 0.2)
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "RiderWeld"
+	weld.Part0 = agent.root
+	weld.Part1 = rootPart
+	weld.Parent = agent.root
+	return weld
+end
+
+function RideController.new(courseId: string, humanoid: Humanoid)
+	local course = CourseConfig.courses[courseId] or CourseConfig.courses[CourseConfig.defaultCourse]
+	local agent = AnimalAgent.new(STARTING_SPECIES, course, 0, 0, false)
+	local root = agent.root
+	local rootHeight = agent.rootHeight
 
 	local self = setmetatable({}, RideController)
-	self.model = model
+	self.agent = agent
 	self.root = root
 	self.humanoid = humanoid
-	self.stats = stats :: AnimalStats
+	self.stats = agent.stats
 	self.course = course
 	self.speedMultiplier = course.speedMultiplier or 1
 	self.temperEnabled = course.temperEnabled ~= false
@@ -134,15 +109,14 @@ function RideController.new(model: Model, humanoid: Humanoid)
 	self.onFinish = nil :: (() -> boolean)?
 	self.onStep = nil :: ((dt: number) -> ())?
 	self.rootHeight = rootHeight
-	self.obstacles = buildObstacles(course)
-	self.legs = {} :: { Leg }
+	self.obstacles = CourseObstacles.build(course)
 	self.connections = {} :: { RBXScriptConnection }
 	self.hud = RideHud.new()
 	-- Ride inputs are bound at high priority and seated characters ignore walk input, so the only
 	-- default control to suppress is the on-screen touch joystick/jump button.
 	self.touchControlsWereEnabled = GuiService.TouchControlsEnabled
 	self.camera = Workspace.CurrentCamera
-	self.dustAttachment, self.dust = makeDust(root, rootHeight)
+	self.dust = makeDust(root, rootHeight)
 
 	-- Input state
 	self.leftHeld = false
@@ -163,13 +137,7 @@ function RideController.new(model: Model, humanoid: Humanoid)
 	self.fov = BASE_FOV
 	self.shake = 0
 
-	for _, legPart in model:GetChildren() do
-		local phase = LEG_PHASES[legPart.Name]
-		local weld = legPart:FindFirstChild("Hip")
-		if phase and weld and weld:IsA("Weld") then
-			table.insert(self.legs, { weld = weld, baseC0 = weld.C0, phaseOffset = phase.offset, isFront = phase.front })
-		end
-	end
+	self.riderWeld = attachRider(agent, humanoid)
 
 	GuiService.TouchControlsEnabled = false
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
@@ -193,7 +161,7 @@ function RideController.new(model: Model, humanoid: Humanoid)
 	return self
 end
 
-export type RideController = typeof(RideController.new(Instance.new("Model"), Instance.new("Humanoid")))
+export type RideController = typeof(RideController.new("", Instance.new("Humanoid")))
 
 function RideController.reset(self: RideController)
 	self.distance = 0
@@ -324,17 +292,7 @@ end
 
 function RideController.checkCollisions(self: RideController): boolean
 	local stats = self.stats
-	local dMin, dMax = self.distance - stats.hitboxHalfLength, self.distance + stats.hitboxHalfLength
-	local xMin, xMax = self.x - stats.hitboxHalfWidth, self.x + stats.hitboxHalfWidth
-	local feet = self:jumpHeight()
-	for _, obstacle in self.obstacles do
-		if dMax > obstacle.dMin and dMin < obstacle.dMax and xMax > obstacle.xMin and xMin < obstacle.xMax then
-			if feet < obstacle.height - CourseConfig.jumpForgiveness then
-				return true
-			end
-		end
-	end
-	return false
+	return CourseObstacles.hits(self.obstacles, self.distance, self.x, stats.hitboxHalfLength, stats.hitboxHalfWidth, self:jumpHeight())
 end
 
 function RideController.updateSteering(self: RideController, dt: number)
@@ -453,41 +411,25 @@ function RideController.respawnAt(self: RideController, distance: number, messag
 	self.hud:showMessage(message)
 end
 
--- Places the animal and animates the gait. The gait phase comes from distance travelled,
--- so the hooves keep pace with the ground instead of sliding.
+-- Hands the rider's movement state to the mount's AnimalAgent, which poses the model.
 function RideController.applyPose(self: RideController)
 	local stats = self.stats
-	local speedFraction = math.clamp(self.speed / stats.cruiseSpeed, 0, 1.2)
-	local phase = self.distance / stats.strideLength * 2 * math.pi
-	local airborne = self.jumpTime ~= nil
+	local agent = self.agent
+	agent.distance = self.distance
+	agent.x = self.x
+	agent.speed = self.speed
+	agent.steerVelocity = self.steerVelocity
+	agent.jumpTime = self.jumpTime
 
-	for _, leg in self.legs do
-		local angle
-		if airborne then
-			angle = if leg.isFront then -0.8 else 0.8
-		else
-			angle = math.sin(phase + leg.phaseOffset) * stats.gallopAmplitude * math.min(speedFraction * 1.5, 1)
-		end
-		leg.weld.C0 = leg.baseC0 * CFrame.Angles(angle, 0, 0)
-	end
-
-	local bob = if airborne then 0 else (math.sin(phase) * 0.5 + 0.5) * stats.bobHeight * math.min(speedFraction, 1)
-	local pitch = if airborne then 0.12 else math.sin(phase + math.pi / 2) * stats.pitchAmplitude * math.min(speedFraction, 1)
-
-	local yaw = -math.atan2(self.steerVelocity, math.max(self.speed, 10)) * stats.turnYaw
-	local roll = -self.steerVelocity * stats.turnLean
+	local restlessYaw = 0
 	if self.state == "running" and self.temper >= stats.temperWarningAt then
 		local restless = (self.temper - stats.temperWarningAt) / (1 - stats.temperWarningAt)
-		yaw += math.sin(self.elapsed * 35) * 0.08 * restless
+		restlessYaw = math.sin(self.elapsed * 35) * 0.08 * restless
 	end
+	agent:pose(restlessYaw)
 
-	local origin = self.course.origin
-	local position = Vector3.new(origin.X + self.x, CourseConfig.groundY + self.rootHeight + self:jumpHeight() + bob, origin.Z - self.distance)
-	self.root.CFrame = CFrame.new(position) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, roll)
-	self.root.AssemblyLinearVelocity = Vector3.new(self.steerVelocity, 0, -self.speed)
-	self.root.AssemblyAngularVelocity = Vector3.zero
-
-	self.dust.Rate = if airborne or self.state ~= "running" then 0 else 40 * speedFraction
+	local speedFraction = math.clamp(self.speed / stats.cruiseSpeed, 0, 1.2)
+	self.dust.Rate = if self.jumpTime ~= nil or self.state ~= "running" then 0 else 40 * speedFraction
 end
 
 function RideController.updateCamera(self: RideController, dt: number)
@@ -535,17 +477,16 @@ function RideController.destroy(self: RideController)
 	ContextActionService:UnbindAction(ACTION_JUMP)
 	RunService:UnbindFromRenderStep(CAMERA_STEP)
 
-	for _, leg in self.legs do
-		if leg.weld.Parent then
-			leg.weld.C0 = leg.baseC0
-		end
+	if self.riderWeld then
+		self.riderWeld:Destroy()
 	end
-	self.dustAttachment:Destroy()
+	self.agent:destroy()
 
 	self.camera.CameraType = Enum.CameraType.Custom
 	self.camera.FieldOfView = BASE_FOV
 	GuiService.TouchControlsEnabled = self.touchControlsWereEnabled
 	if self.humanoid.Parent then
+		self.humanoid.Sit = false
 		self.humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 	end
 	self.hud:destroy()

@@ -9,7 +9,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local SanctuaryConfig = require(ReplicatedStorage.Shared.Config.SanctuaryConfig)
-local ZebraBuilder = require(ReplicatedStorage.Shared.Animals.ZebraBuilder)
+local AnimalBuilder = require(ReplicatedStorage.Shared.Animals.AnimalBuilder)
 local UiKit = require(script.Parent.UiKit)
 
 local SanctuaryView = {}
@@ -25,7 +25,7 @@ end
 
 local function spawnZebra(animate: boolean)
 	local base = habitatCFrame()
-	local zebra = ZebraBuilder.build(base)
+	local zebra = AnimalBuilder.build("Zebra", base, true)
 	zebra.Name = "MyHabitatZebra"
 	zebra.Parent = Workspace
 
@@ -61,7 +61,7 @@ end
 
 -- Translucent "who will live here?" zebra plus a floating question mark for the empty habitat.
 local function spawnGhost(): Model
-	local ghost = ZebraBuilder.build(habitatCFrame())
+	local ghost = AnimalBuilder.build("Zebra", habitatCFrame(), true)
 	ghost.Name = "HabitatGhost"
 	for _, part in ghost:GetDescendants() do
 		if part:IsA("BasePart") and part.Transparency < 1 then

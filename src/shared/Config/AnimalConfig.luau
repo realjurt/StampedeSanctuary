@@ -1,32 +1,37 @@
 --!strict
--- Tuning values for rideable animals. Distances in studs, times in seconds.
+-- Tuning values per species. Distances in studs, times in seconds.
 
 export type AnimalStats = {
 	displayName: string,
-	-- Forward speed: starts at startSpeed and eases up to cruiseSpeed over speedRampTime.
+	-- Riding: forward speed starts at startSpeed and eases up to cruiseSpeed over speedRampTime.
 	startSpeed: number,
 	cruiseSpeed: number,
 	speedRampTime: number,
-	-- Sideways steering
 	maxSteerSpeed: number,
 	steerAcceleration: number, -- studs/s² toward the desired sideways speed
 	touchFollowGain: number, -- how hard the animal chases the thumb's target position
-	-- Jump
 	jumpHeight: number,
 	jumpDuration: number,
-	-- Temper
 	temperDuration: number, -- seconds of riding until fully restless
 	temperWarningAt: number, -- 0..1 fraction where warnings start
-	-- Collision box
 	hitboxHalfWidth: number,
 	hitboxHalfLength: number,
 	-- Gait (tied to distance so feet match the ground)
-	strideLength: number, -- studs per full gallop cycle
-	gallopAmplitude: number, -- leg swing in radians
+	strideLength: number,
+	gallopAmplitude: number,
 	bobHeight: number,
-	pitchAmplitude: number, -- body rocking in radians
-	turnYaw: number, -- how much the body turns toward its sideways movement
-	turnLean: number, -- body lean per stud/s of sideways speed
+	pitchAmplitude: number,
+	turnYaw: number,
+	turnLean: number,
+	-- Herd behaviour (wild animals)
+	herdWeight: number, -- relative chance a herd is this species
+	herdMin: number,
+	herdMax: number,
+	herdSpeedFactor: number, -- fraction of the rider's current speed
+	herdMinSpeed: number,
+	herdSteerSpeed: number,
+	wanderAmplitude: number, -- studs of side-to-side drift
+	wanderFrequency: number, -- drift cycles per second
 }
 
 local AnimalConfig: { [string]: AnimalStats } = {
@@ -50,6 +55,72 @@ local AnimalConfig: { [string]: AnimalStats } = {
 		pitchAmplitude = 0.07,
 		turnYaw = 0.8,
 		turnLean = 0.006,
+		herdWeight = 5,
+		herdMin = 3,
+		herdMax = 5,
+		herdSpeedFactor = 0.88,
+		herdMinSpeed = 16,
+		herdSteerSpeed = 14,
+		wanderAmplitude = 4,
+		wanderFrequency = 0.35,
+	},
+	Elephant = {
+		displayName = "Elephant",
+		startSpeed = 22,
+		cruiseSpeed = 38,
+		speedRampTime = 8,
+		maxSteerSpeed = 22,
+		steerAcceleration = 150,
+		touchFollowGain = 7,
+		jumpHeight = 5,
+		jumpDuration = 0.7,
+		temperDuration = 24,
+		temperWarningAt = 0.7,
+		hitboxHalfWidth = 2.6,
+		hitboxHalfLength = 3.5,
+		strideLength = 9,
+		gallopAmplitude = 0.45,
+		bobHeight = 0.35,
+		pitchAmplitude = 0.04,
+		turnYaw = 0.5,
+		turnLean = 0.004,
+		herdWeight = 2,
+		herdMin = 1,
+		herdMax = 2,
+		herdSpeedFactor = 0.68,
+		herdMinSpeed = 12,
+		herdSteerSpeed = 7,
+		wanderAmplitude = 1.5,
+		wanderFrequency = 0.15,
+	},
+	Giraffe = {
+		displayName = "Giraffe",
+		startSpeed = 26,
+		cruiseSpeed = 44,
+		speedRampTime = 9,
+		maxSteerSpeed = 28,
+		steerAcceleration = 190,
+		touchFollowGain = 8,
+		jumpHeight = 6,
+		jumpDuration = 0.65,
+		temperDuration = 27,
+		temperWarningAt = 0.7,
+		hitboxHalfWidth = 1.5,
+		hitboxHalfLength = 2.5,
+		strideLength = 14,
+		gallopAmplitude = 0.55,
+		bobHeight = 0.3,
+		pitchAmplitude = 0.05,
+		turnYaw = 0.6,
+		turnLean = 0.005,
+		herdWeight = 3,
+		herdMin = 2,
+		herdMax = 3,
+		herdSpeedFactor = 0.8,
+		herdMinSpeed = 14,
+		herdSteerSpeed = 10,
+		wanderAmplitude = 2.5,
+		wanderFrequency = 0.2,
 	},
 }
 

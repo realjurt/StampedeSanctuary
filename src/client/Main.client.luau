@@ -1,6 +1,6 @@
 --!strict
--- Starts a ride whenever the local character is seated on an animal's RiderSeat
--- (only happens after the player uses the Safari Gate), and runs the sanctuary-side UI.
+-- Starts a ride when the server marks this player as on safari (InSafari, set only after they use
+-- the Safari Gate) and stops it when the run ends. Also runs the sanctuary-side UI.
 
 local Players = game:GetService("Players")
 
@@ -24,32 +24,33 @@ local function stopRide()
 	end
 end
 
-local function onSeatChanged(humanoid: Humanoid)
-	local seat = humanoid.SeatPart
-	stopRide()
-	if seat and seat.Name == "RiderSeat" and seat.Parent and seat.Parent:IsA("Model") then
-		local ride = RideController.new(seat.Parent, humanoid)
-		current = ride
-		if ride.course.tutorial then
-			tutorial = TutorialDirector.new(ride)
-		end
+local function syncRide()
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local inSafari = player:GetAttribute("InSafari") == true
+	local courseId = player:GetAttribute("SafariCourse")
+	if not inSafari or not humanoid or humanoid.Health <= 0 or typeof(courseId) ~= "string" then
+		stopRide()
+		return
+	end
+	if current then
+		return
+	end
+	local ride = RideController.new(courseId, humanoid)
+	current = ride
+	if ride.course.tutorial then
+		tutorial = TutorialDirector.new(ride)
 	end
 end
 
-local function onCharacterAdded(character: Model)
+player:GetAttributeChangedSignal("InSafari"):Connect(syncRide)
+player.CharacterAdded:Connect(function(character)
 	stopRide()
-	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
-	humanoid:GetPropertyChangedSignal("SeatPart"):Connect(function()
-		onSeatChanged(humanoid)
-	end)
-	if humanoid.SeatPart then
-		onSeatChanged(humanoid)
-	end
-end
-
-player.CharacterAdded:Connect(onCharacterAdded)
+	character:WaitForChild("Humanoid")
+	syncRide()
+end)
 if player.Character then
-	task.spawn(onCharacterAdded, player.Character)
+	task.spawn(syncRide)
 end
 
 task.spawn(OnboardingController.start)

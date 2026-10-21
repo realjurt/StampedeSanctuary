@@ -1,21 +1,19 @@
 --!strict
--- Safari runs: the Safari Gate starts a run (never automatic); leaving, dying, or disconnecting ends it.
--- Movement is client-driven (D-002): the server spawns the animal, seats the rider, hands over physics
--- ownership, and returns the player to the sanctuary afterwards.
+-- Safari runs (D-016). The Safari Gate starts a run (never automatic); leaving, dying, or
+-- disconnecting ends it. The server owns run state — course, start time, herd seed, current mount
+-- species — and publishes it as player attributes. Mounts and herds are client-side visuals.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 
 local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
-local ZebraBuilder = require(ReplicatedStorage.Shared.Animals.ZebraBuilder)
 local Net = require(script.Parent.Net)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 
 type Run = {
 	courseId: string,
-	animal: Model,
 	startedAt: number,
+	seed: number,
 	connections: { RBXScriptConnection },
 }
 
@@ -23,10 +21,11 @@ local SafariService = {}
 
 local TELEPORT_HOLD = 0.3
 local TUTORIAL_COURSE = "Tutorial"
+local STARTING_SPECIES = "Zebra"
 
 local runs: { [Player]: Run } = {}
-local animalsFolder: Folder
 local sanctuarySpawn: CFrame
+local seedRng = Random.new()
 
 -- Read-only view of a player's active run, for reward validation.
 function SafariService.getRun(player: Player): (string?, number?)
@@ -46,9 +45,11 @@ local function cleanup(player: Player): boolean
 	for _, connection in run.connections do
 		connection:Disconnect()
 	end
-	run.animal:Destroy()
 	if player.Parent then
 		player:SetAttribute("InSafari", false)
+		player:SetAttribute("SafariCourse", nil)
+		player:SetAttribute("SafariSeed", nil)
+		player:SetAttribute("MountSpecies", nil)
 	end
 	return true
 end
@@ -80,39 +81,26 @@ local function returnToSanctuary(player: Player)
 end
 
 function SafariService.startRun(player: Player, courseId: string)
-	if runs[player] then
+	if runs[player] or not CourseConfig.courses[courseId] then
 		return
 	end
-	local course = CourseConfig.courses[courseId]
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not course or not character or not humanoid or humanoid.Health <= 0 or humanoid.SeatPart then
-		return
-	end
-	if not PlayerDataService.get(player) then
+	if not character or not humanoid or humanoid.Health <= 0 then
 		return
 	end
 
-	local animal = ZebraBuilder.build(CFrame.new(course.origin.X, CourseConfig.groundY, course.origin.Z))
-	animal.Name = player.Name .. "_Mount"
-	animal:SetAttribute("CourseId", courseId)
-	animal:SetAttribute("RiderUserId", player.UserId)
-	animal.Parent = animalsFolder
-
-	local run: Run = { courseId = courseId, animal = animal, startedAt = os.clock(), connections = {} }
+	local run: Run = {
+		courseId = courseId,
+		startedAt = os.clock(),
+		seed = seedRng:NextInteger(1, 2 ^ 30),
+		connections = {},
+	}
 	runs[player] = run
-	player:SetAttribute("InSafari", true)
-
-	local seat = animal:FindFirstChild("RiderSeat") :: Seat
-	seat:Sit(humanoid)
-	local root = animal.PrimaryPart :: BasePart
-	root.Anchored = false
-	local ok, err = pcall(function()
-		root:SetNetworkOwner(player)
-	end)
-	if not ok then
-		warn(`SafariService: could not give {player.Name} ownership of their mount: {err}`)
-	end
+	player:SetAttribute("SafariCourse", courseId)
+	player:SetAttribute("SafariSeed", run.seed)
+	player:SetAttribute("MountSpecies", STARTING_SPECIES)
+	player:SetAttribute("InSafari", true) -- set last: the client starts its ride when this flips
 
 	table.insert(run.connections, humanoid.Died:Connect(function()
 		cleanup(player)
@@ -126,9 +114,6 @@ end
 
 function SafariService.start(startPrompt: ProximityPrompt, spawnCFrame: CFrame)
 	sanctuarySpawn = spawnCFrame
-	animalsFolder = Instance.new("Folder")
-	animalsFolder.Name = "ActiveAnimals"
-	animalsFolder.Parent = Workspace
 
 	startPrompt.Triggered:Connect(function(player)
 		local data = PlayerDataService.get(player)
