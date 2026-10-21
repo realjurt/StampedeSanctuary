@@ -72,6 +72,12 @@ local function publish(player: Player, data: PlayerData)
 	player:SetAttribute("StarterZebraUnlocked", data.starterZebraUnlocked)
 	player:SetAttribute("OnboardingDismissed", data.onboardingDismissed)
 	player:SetAttribute("LeapTutorialDone", data.leapTutorialDone)
+	local discovered = {}
+	for species in data.discovered do
+		table.insert(discovered, species)
+	end
+	table.sort(discovered)
+	player:SetAttribute("Discovered", table.concat(discovered, ","))
 end
 
 local function save(player: Player)

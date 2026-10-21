@@ -120,15 +120,14 @@ function RideHud.new()
 	ability.Position = UDim2.new(0.5, 0, 0, 116)
 	ability.AutomaticSize = Enum.AutomaticSize.X
 	ability.Size = UDim2.fromOffset(0, 30)
-	ability.BackgroundColor3 = UiKit.PANEL
+	ability.BackgroundTransparency = 1 -- floating outlined text, like the reference HUD
 	ability.Parent = top
-	UiKit.corner(ability, UDim.new(0, 6))
-	UiKit.border(ability, 2)
 	local abilityPadding = Instance.new("UIPadding")
 	abilityPadding.PaddingLeft = UDim.new(0, 12)
 	abilityPadding.PaddingRight = UDim.new(0, 12)
 	abilityPadding.Parent = ability
-	self.ability = autoLabel(ability, "Text", "", 17)
+	self.ability = autoLabel(ability, "Text", "", 22)
+	self.ability.TextColor3 = UiKit.PALETTE.yellow.top
 
 	-- Left: menu buttons
 	local nav = container(gui, "Menu", Vector2.new(0, 0.5), UDim2.new(0, 14, 0.5, 0), Vector2.new(160, 222))

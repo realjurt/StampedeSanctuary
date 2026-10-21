@@ -16,14 +16,15 @@ export type Swatch = { top: Color3, bottom: Color3 }
 
 UiKit.FONT = Enum.Font.FredokaOne
 UiKit.INK = Color3.fromRGB(11, 11, 14)
-UiKit.PANEL = Color3.fromRGB(34, 35, 42)
+UiKit.PANEL = Color3.fromRGB(46, 47, 55)
 UiKit.TRACK = Color3.fromRGB(16, 16, 20)
+UiKit.INSET = Color3.fromRGB(26, 27, 32) -- darker sunken area inside windows
 UiKit.QUIET = Color3.fromRGB(170, 172, 182)
 UiKit.WHITE = Color3.fromRGB(250, 250, 252)
 
 UiKit.PALETTE = {
-	green = { top = Color3.fromRGB(86, 236, 104), bottom = Color3.fromRGB(22, 150, 52) },
-	cyan = { top = Color3.fromRGB(64, 222, 250), bottom = Color3.fromRGB(10, 128, 178) },
+	green = { top = Color3.fromRGB(92, 240, 72), bottom = Color3.fromRGB(28, 172, 40) },
+	cyan = { top = Color3.fromRGB(60, 210, 255), bottom = Color3.fromRGB(24, 132, 232) },
 	blue = { top = Color3.fromRGB(84, 140, 255), bottom = Color3.fromRGB(28, 62, 206) },
 	purple = { top = Color3.fromRGB(168, 110, 255), bottom = Color3.fromRGB(88, 34, 200) },
 	pink = { top = Color3.fromRGB(255, 112, 210), bottom = Color3.fromRGB(196, 24, 140) },
@@ -119,13 +120,13 @@ function UiKit.label(parent: Instance, name: string, text: string, textSize: num
 	l.Text = text
 	l.ZIndex = Z_CONTENT
 	l.Parent = parent
-	UiKit.stroke(l, math.max(2, math.floor(textSize / 9 + 0.5)))
+	UiKit.stroke(l, math.max(2, math.floor(textSize / 6.5 + 0.5)))
 	return l
 end
 
 -- Diagonal gloss stripes at one fixed on-screen angle, plus the top light band.
 function UiKit.gloss(frame: GuiObject, strength: number?)
-	local alpha = 1 - (strength or 0.22)
+	local alpha = 1 - (strength or 0.3)
 	local frameCorner = frame:FindFirstChildOfClass("UICorner")
 	local radius = if frameCorner then frameCorner.CornerRadius else UDim.new(0, 8)
 	local highlight = Instance.new("Frame")
@@ -322,10 +323,10 @@ function UiKit.setButtonEnabled(button: GuiButton, enabled: boolean)
 end
 
 function UiKit.closeButton(parent: Instance): TextButton
-	local b = UiKit.button(parent, "Close", "X", "red", 26)
+	local b = UiKit.button(parent, "Close", "X", "red", 34)
 	b.AnchorPoint = Vector2.new(1, 0.5)
 	b.Position = UDim2.new(1, -9, 0.5, 0)
-	b.Size = UDim2.fromOffset(42, 42)
+	b.Size = UDim2.fromOffset(50, 50)
 	return b
 end
 
@@ -348,6 +349,25 @@ function UiKit.keycap(parent: Instance, key: string): Frame
 	l.Size = UDim2.fromScale(0, 1)
 	l.TextWrapped = false
 	return cap
+end
+
+-- Darker sunken area inside a window (grids, lists), as in the reference.
+function UiKit.inset(parent: Instance, name: string): Frame
+	local f = Instance.new("Frame")
+	f.Name = name
+	f.BackgroundColor3 = UiKit.INSET
+	f.Parent = parent
+	UiKit.corner(f, UDim.new(0, 6))
+	UiKit.border(f, 3)
+	return f
+end
+
+-- Centered "-- TITLE --" section heading in yellow.
+function UiKit.sectionTitle(parent: Instance, text: string, size: number?): TextLabel
+	local l = UiKit.label(parent, "Section", `-- {string.upper(text)} --`, size or 34)
+	l.TextColor3 = UiKit.PALETTE.yellow.top
+	l.TextWrapped = false
+	return l
 end
 
 export type Bar = {
@@ -457,7 +477,7 @@ export type Window = {
 	hide: () -> (),
 }
 
-local HEADER_HEIGHT = 56
+local HEADER_HEIGHT = 64
 
 -- Dark window with a glossy colored header, outlined title and red X (D-022).
 function UiKit.window(parent: Instance, title: string, color: string, size: Vector2, closable: boolean?): Window
@@ -492,7 +512,7 @@ function UiKit.window(parent: Instance, title: string, color: string, size: Vect
 	divider.Size = UDim2.new(1, 0, 0, 4)
 	divider.ZIndex = Z_CONTENT
 	divider.Parent = root
-	local titleLabel = UiKit.label(header, "Title", title, 32)
+	local titleLabel = UiKit.label(header, "Title", title, 42)
 	titleLabel.Position = UDim2.fromOffset(18, 0)
 	titleLabel.Size = UDim2.new(1, -80, 1, 0)
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left

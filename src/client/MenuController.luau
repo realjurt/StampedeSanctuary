@@ -1,8 +1,9 @@
 --!strict
 -- Menu windows opened from the side buttons (D-022). One window at a time. While a menu is open the
--- `changed` event fires true so an active ride can pause. Index is filled in by UI-2; Shop and
+-- `changed` event fires true so an active ride can pause. Index is the Animal Index (UI-2); Shop and
 -- Settings are deliberately "Coming soon" — no purchases or settings are built yet.
 
+local AnimalIndex = require(script.Parent.AnimalIndex)
 local UiKit = require(script.Parent.UiKit)
 
 type Entry = { window: UiKit.Window }
@@ -13,7 +14,7 @@ local changedEvent = Instance.new("BindableEvent")
 MenuController.changed = changedEvent.Event
 
 local MENUS = {
-	Index = { title = "Animal Index", color = "cyan", icon = "📖", line = "Your animal collection arrives in the next update." },
+	Index = { title = "Animal Index", color = "cyan", icon = "📖", line = "" },
 	Shop = { title = "Shop", color = "green", icon = "🛍️", line = "The Shop opens in a future update." },
 	Settings = { title = "Settings", color = "blue", icon = "⚙️", line = "Settings are coming in a future update." },
 }
@@ -38,9 +39,8 @@ local function comingSoon(window: UiKit.Window, icon: string, line: string)
 	iconLabel.LayoutOrder = 1
 	iconLabel.Parent = window.body
 
-	local title = UiKit.label(window.body, "Title", "Coming soon!", 40)
+	local title = UiKit.sectionTitle(window.body, "Coming soon", 40)
 	title.Size = UDim2.new(1, 0, 0, 48)
-	title.TextColor3 = UiKit.PALETTE.yellow.top
 	title.LayoutOrder = 2
 
 	local sub = UiKit.label(window.body, "Line", line, 20)
@@ -58,8 +58,14 @@ local function ensure(name: string): Entry?
 	end
 	local entry = entries[name]
 	if not entry then
-		local window = UiKit.window(gui :: ScreenGui, spec.title, spec.color, Vector2.new(520, 330))
-		comingSoon(window, spec.icon, spec.line)
+		local window
+		if name == "Index" then
+			window = UiKit.window(gui :: ScreenGui, spec.title, spec.color, Vector2.new(780, 470))
+			AnimalIndex.build(window)
+		else
+			window = UiKit.window(gui :: ScreenGui, spec.title, spec.color, Vector2.new(640, 400))
+			comingSoon(window, spec.icon, spec.line)
+		end
 		local close = window.closeButton :: TextButton
 		close.Activated:Connect(function()
 			MenuController.close()
