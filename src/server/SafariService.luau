@@ -7,13 +7,20 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
+local HerdSchedule = require(ReplicatedStorage.Shared.Herds.HerdSchedule)
 local Net = require(script.Parent.Net)
 local PlayerDataService = require(script.Parent.PlayerDataService)
+
+type HerdMemberInfo = { species: string, distance: number }
 
 type Run = {
 	courseId: string,
 	startedAt: number,
 	seed: number,
+	-- Herd members this run's seed produces, rebuilt server-side to validate switches (D-016).
+	herdMembers: { [string]: HerdMemberInfo },
+	usedMembers: { [string]: boolean },
+	switches: number,
 	connections: { RBXScriptConnection },
 }
 
@@ -22,6 +29,20 @@ local SafariService = {}
 local TELEPORT_HOLD = 0.3
 local TUTORIAL_COURSE = "Tutorial"
 local STARTING_SPECIES = "Zebra"
+local MAX_PLAUSIBLE_SPEED = 70 -- studs/s, above any species' boosted cruise speed
+local REACH_SLACK = 40 -- leap range plus margin
+
+local function buildHerdMembers(course: CourseConfig.Course, seed: number): { [string]: HerdMemberInfo }
+	local members = {}
+	if course.herds then
+		for _, herd in HerdSchedule.generate(course, seed) do
+			for _, member in herd.members do
+				members[member.id] = { species = member.species, distance = member.distance }
+			end
+		end
+	end
+	return members
+end
 
 local runs: { [Player]: Run } = {}
 local sanctuarySpawn: CFrame
@@ -90,10 +111,14 @@ function SafariService.startRun(player: Player, courseId: string)
 		return
 	end
 
+	local seed = seedRng:NextInteger(1, 2 ^ 30)
 	local run: Run = {
 		courseId = courseId,
 		startedAt = os.clock(),
-		seed = seedRng:NextInteger(1, 2 ^ 30),
+		seed = seed,
+		herdMembers = buildHerdMembers(CourseConfig.courses[courseId], seed),
+		usedMembers = {},
+		switches = 0,
 		connections = {},
 	}
 	runs[player] = run
@@ -112,6 +137,36 @@ function SafariService.startRun(player: Player, courseId: string)
 	end))
 end
 
+-- The client predicts leaps instantly; the server accepts one only if that herd animal exists in this
+-- run's seeded schedule, hasn't been ridden yet, and could plausibly have been reached by now.
+local function switchMount(player: Player, memberId: any)
+	local run = runs[player]
+	if not run or typeof(memberId) ~= "string" or #memberId > 16 then
+		return
+	end
+	local member = run.herdMembers[memberId]
+	local elapsed = os.clock() - run.startedAt
+	if not member or run.usedMembers[memberId] or member.distance - REACH_SLACK > elapsed * MAX_PLAUSIBLE_SPEED then
+		warn(`SafariService: rejected switch from {player.Name} to "{memberId}"`)
+		return
+	end
+	run.usedMembers[memberId] = true
+	run.switches += 1
+	player:SetAttribute("MountSpecies", member.species)
+end
+
+-- "Ride again" restarts the same course: fresh timer, herds and starting mount.
+local function restartRun(player: Player)
+	local run = runs[player]
+	if not run then
+		return
+	end
+	run.startedAt = os.clock()
+	table.clear(run.usedMembers)
+	run.switches = 0
+	player:SetAttribute("MountSpecies", STARTING_SPECIES)
+end
+
 function SafariService.start(startPrompt: ProximityPrompt, spawnCFrame: CFrame)
 	sanctuarySpawn = spawnCFrame
 
@@ -124,6 +179,8 @@ function SafariService.start(startPrompt: ProximityPrompt, spawnCFrame: CFrame)
 		SafariService.startRun(player, if tutorialNext then TUTORIAL_COURSE else CourseConfig.defaultCourse)
 	end)
 	Net.on("ReturnToSanctuary", 0.5, returnToSanctuary)
+	Net.on("SwitchMount", 0.3, switchMount)
+	Net.on("RestartRun", 0.5, restartRun)
 	Players.PlayerRemoving:Connect(cleanup)
 end
 

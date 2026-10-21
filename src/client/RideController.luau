@@ -1,10 +1,10 @@
 --!strict
 -- Client-driven arcade riding (D-007, D-016): auto-run forward with a speed ramp, free horizontal
--- steering, jump, temper, obstacle checks, speed-reactive camera. The mount is a client-side
--- AnimalAgent with the rider welded on.
+-- steering, jump, temper, obstacle checks, speed-reactive camera, and leaping between animals.
+-- The mount is a client-side AnimalAgent with the rider welded on; leaps are predicted instantly
+-- here and validated by the server (SwitchMount).
 
 local ContextActionService = game:GetService("ContextActionService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GuiService = game:GetService("GuiService")
 local RunService = game:GetService("RunService")
@@ -15,6 +15,16 @@ local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
 local AnimalAgent = require(script.Parent.AnimalAgent)
 local CourseObstacles = require(script.Parent.CourseObstacles)
 local RideHud = require(script.Parent.RideHud)
+
+type Leap = {
+	target: AnimalAgent.AnimalAgent,
+	elapsed: number,
+	fromPosition: Vector3,
+	lastPosition: Vector3,
+	fromDistance: number,
+	fromX: number,
+	height: number,
+}
 
 local RideController = {}
 RideController.__index = RideController
@@ -33,8 +43,15 @@ local TOUCH_SCREEN_SPAN = 1.1 -- a full-screen-width drag moves this many track 
 local LAUNCH_ACCELERATION = 60 -- studs/s² when leaving the start line
 local END_PANEL_DELAY = 0.8
 local RESPAWN_COUNTDOWN = 0.7
-
 local STARTING_SPECIES = "Zebra"
+
+-- Leaping (Milestone 5)
+local LEAP_DURATION = 0.45
+local LEAP_BASE_HEIGHT = 4
+local LEAP_HEIGHT_PER_STUD = 0.12
+local LEAP_BOOST = 1.2 -- speed multiplier right after landing
+local LEAP_BOOST_TIME = 1.5
+local LAND_GRACE = 0.5 -- seconds after landing with no crashes
 
 local hintShown = false
 
@@ -71,11 +88,15 @@ local function makeDust(root: BasePart, rootHeight: number): ParticleEmitter
 	return dust
 end
 
+local function riderRootPart(humanoid: Humanoid): BasePart?
+	local character = humanoid.Parent
+	return character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
 -- Welds the rider's character onto the mount's saddle. The mount exists only on this client; the
 -- character is client-owned, so its movement still replicates to the server and others (D-016).
 local function attachRider(agent: AnimalAgent.AnimalAgent, humanoid: Humanoid): WeldConstraint?
-	local character = humanoid.Parent
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local rootPart = riderRootPart(humanoid)
 	if not rootPart then
 		return nil
 	end
@@ -91,16 +112,12 @@ end
 
 function RideController.new(courseId: string, humanoid: Humanoid)
 	local course = CourseConfig.courses[courseId] or CourseConfig.courses[CourseConfig.defaultCourse]
-	local agent = AnimalAgent.new(STARTING_SPECIES, course, 0, 0, false)
-	local root = agent.root
-	local rootHeight = agent.rootHeight
+	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 	local self = setmetatable({}, RideController)
-	self.agent = agent
-	self.root = root
-	self.humanoid = humanoid
-	self.stats = agent.stats
+	self.courseId = courseId
 	self.course = course
+	self.humanoid = humanoid
 	self.speedMultiplier = course.speedMultiplier or 1
 	self.temperEnabled = course.temperEnabled ~= false
 	-- Optional hooks (used by TutorialDirector). Returning true from onCrash/onFinish means the hook
@@ -108,15 +125,20 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	self.onCrash = nil :: (() -> boolean)?
 	self.onFinish = nil :: (() -> boolean)?
 	self.onStep = nil :: ((dt: number) -> ())?
-	self.rootHeight = rootHeight
+	-- Set by Main when the course has herds; provides `target`, `take`, `release`.
+	self.herds = nil :: any
 	self.obstacles = CourseObstacles.build(course)
+	self.hiddenParts = {} :: { BasePart }
+	self.seenSpecies = {} :: { [string]: boolean }
 	self.connections = {} :: { RBXScriptConnection }
 	self.hud = RideHud.new()
+	self.returnRemote = remotes:WaitForChild("ReturnToSanctuary") :: RemoteEvent
+	self.restartRemote = remotes:WaitForChild("RestartRun") :: RemoteEvent
+	self.switchRemote = remotes:WaitForChild("SwitchMount") :: RemoteEvent
 	-- Ride inputs are bound at high priority and seated characters ignore walk input, so the only
 	-- default control to suppress is the on-screen touch joystick/jump button.
 	self.touchControlsWereEnabled = GuiService.TouchControlsEnabled
 	self.camera = Workspace.CurrentCamera
-	self.dust = makeDust(root, rootHeight)
 
 	-- Input state
 	self.leftHeld = false
@@ -129,15 +151,19 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	self.touchMoved = false
 	self.touchTargetX = nil :: number?
 
-	-- Presentation state
+	-- Mount + presentation state
+	self.leap = nil :: Leap?
+	self.leapHeight = 0
+	self.boostTime = 0
+	self.graceTime = 0
 	self.x = 0
 	self.steerVelocity = 0
+	self:setMount(AnimalAgent.new(STARTING_SPECIES, course, 0, 0, false))
+	self.seenSpecies[STARTING_SPECIES] = true
 	self.cameraX = 0
-	self.cameraY = CourseConfig.groundY + rootHeight + 9
+	self.cameraY = CourseConfig.groundY + self.rootHeight + 9
 	self.fov = BASE_FOV
 	self.shake = 0
-
-	self.riderWeld = attachRider(agent, humanoid)
 
 	GuiService.TouchControlsEnabled = false
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
@@ -163,7 +189,49 @@ end
 
 export type RideController = typeof(RideController.new("", Instance.new("Humanoid")))
 
+-- Makes `agent` the ridden mount: welds the rider on and adopts its stats.
+function RideController.setMount(self: RideController, agent: AnimalAgent.AnimalAgent)
+	agent:setRidden(true)
+	self.agent = agent
+	self.root = agent.root
+	self.stats = agent.stats
+	self.rootHeight = agent.rootHeight
+	self.dust = makeDust(agent.root, agent.rootHeight)
+	self.riderWeld = attachRider(agent, self.humanoid)
+end
+
+function RideController.detachRider(self: RideController)
+	if self.riderWeld then
+		self.riderWeld:Destroy()
+		self.riderWeld = nil
+	end
+	local attachment = self.dust.Parent
+	if attachment then
+		attachment:Destroy()
+	end
+end
+
 function RideController.reset(self: RideController)
+	-- Abort a leap in progress; its target was already taken out of the herd.
+	local leap = self.leap
+	if leap then
+		leap.target:destroy()
+		self.leap = nil
+	end
+	-- "Ride again" always starts on the starting species.
+	if self.agent.species ~= STARTING_SPECIES or not self.agent.model.Parent then
+		self:detachRider()
+		if self.agent.model.Parent then
+			self.agent:destroy()
+		end
+		self:setMount(AnimalAgent.new(STARTING_SPECIES, self.course, 0, 0, false))
+	end
+	CourseObstacles.reset(self.obstacles)
+	for _, part in self.hiddenParts do
+		part.LocalTransparencyModifier = 0
+	end
+	table.clear(self.hiddenParts)
+
 	self.distance = 0
 	self.x = 0
 	self.steerVelocity = 0
@@ -172,6 +240,9 @@ function RideController.reset(self: RideController)
 	self.jumpBufferedAt = nil :: number?
 	self.temper = 0
 	self.elapsed = 0
+	self.leapHeight = 0
+	self.boostTime = 0
+	self.graceTime = 0
 	self.state = "countdown"
 	self.timer = CourseConfig.countdownTime
 	self.touchTargetX = nil
@@ -179,16 +250,112 @@ function RideController.reset(self: RideController)
 	self.hud:showMessage("Ready...")
 	self.hud:setTemper(0, self.stats.temperWarningAt)
 	self.hud:setProgress(0)
+	self.restartRemote:FireServer()
 end
 
+-- One button: leap to the targeted herd animal if there is one, otherwise a normal hop (D-008).
 function RideController.jump(self: RideController)
 	if self.state ~= "running" then
+		return
+	end
+	local herds = self.herds
+	local target = herds and herds.target
+	if target then
+		self:startLeap(target)
 		return
 	end
 	if self.jumpTime == nil then
 		self.jumpTime = 0
 	else
 		self.jumpBufferedAt = os.clock()
+	end
+end
+
+function RideController.startLeap(self: RideController, wild: any)
+	local rootPart = riderRootPart(self.humanoid)
+	if not rootPart then
+		return
+	end
+	local target = wild.agent :: AnimalAgent.AnimalAgent
+	self.herds:take(wild)
+
+	-- The old mount rejoins the herd as a wild animal and drifts away.
+	local oldMount = self.agent
+	self:detachRider()
+	self.herds:release(oldMount)
+
+	local gap = target.distance - self.distance
+	self.leap = {
+		target = target,
+		elapsed = 0,
+		fromPosition = rootPart.Position,
+		lastPosition = rootPart.Position,
+		fromDistance = self.distance,
+		fromX = self.x,
+		height = LEAP_BASE_HEIGHT + gap * LEAP_HEIGHT_PER_STUD,
+	}
+	self.jumpTime = nil
+	self.jumpBufferedAt = nil
+	self.state = "leaping"
+	self.switchRemote:FireServer(wild.id)
+end
+
+-- Arcs the rider toward the target's saddle; the arc re-aims at the moving target every frame, so a
+-- leap that has started always lands (forgiving by design).
+function RideController.updateLeap(self: RideController, dt: number)
+	local leap = self.leap :: Leap
+	local target = leap.target
+	local rootPart = riderRootPart(self.humanoid)
+	leap.elapsed += dt
+
+	target.distance += target.speed * dt
+	target.steerVelocity = moveToward(target.steerVelocity, 0, 60 * dt)
+	target:pose(0)
+
+	local t = math.min(leap.elapsed / LEAP_DURATION, 1)
+	local eased = t * t * (3 - 2 * t)
+	local saddle = target.root.CFrame * CFrame.new(0, target.riderOffset, 0.2)
+	self.leapHeight = 4 * leap.height * t * (1 - t)
+	local position = leap.fromPosition:Lerp(saddle.Position, eased) + Vector3.new(0, self.leapHeight, 0)
+	if rootPart then
+		rootPart.CFrame = CFrame.new(position) * saddle.Rotation
+		rootPart.AssemblyLinearVelocity = (position - leap.lastPosition) / math.max(dt, 1e-3)
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+	end
+	leap.lastPosition = position
+	self.distance = leap.fromDistance + (target.distance - leap.fromDistance) * eased
+	self.x = leap.fromX + (target.x - leap.fromX) * eased
+
+	if t >= 1 then
+		self:land()
+	end
+end
+
+function RideController.land(self: RideController)
+	local leap = self.leap :: Leap
+	local target = leap.target
+	self.leap = nil
+	self.leapHeight = 0
+	self:setMount(target)
+
+	self.distance = target.distance
+	self.x = target.x
+	self.steerVelocity = 0
+	self.speed = math.max(self.speed, target.speed)
+	-- Immediate benefits: a calm mount, a burst of speed, and a moment where nothing can crash you.
+	self.temper = 0
+	self.boostTime = LEAP_BOOST_TIME
+	self.graceTime = LAND_GRACE
+	self.state = "running"
+	self.shake = 0.15
+	self.dust:Emit(20)
+
+	local stats = self.stats
+	if self.seenSpecies[target.species] then
+		self.hud:showMessage(stats.displayName .. "!", 0.7)
+	else
+		self.seenSpecies[target.species] = true
+		self.hud:showMessage(stats.abilityHint, 1.8)
 	end
 end
 
@@ -205,9 +372,8 @@ function RideController.bindInput(self: RideController)
 		return Enum.ContextActionResult.Sink
 	end
 
-	local returnRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ReturnToSanctuary") :: RemoteEvent
 	local function leave()
-		returnRemote:FireServer()
+		self.returnRemote:FireServer()
 	end
 	table.insert(self.connections, self.hud.leaveButton.Activated:Connect(leave))
 	table.insert(self.connections, self.hud.returnButton.Activated:Connect(leave))
@@ -234,7 +400,7 @@ function RideController.bindInput(self: RideController)
 		end
 	end))
 
-	-- Touch: drag anywhere to steer (animal follows the thumb's sideways offset); quick tap = jump.
+	-- Touch: drag anywhere to steer (animal follows the thumb's sideways offset); quick tap = jump/leap.
 	table.insert(self.connections, UserInputService.TouchStarted:Connect(function(input, gameProcessed)
 		if gameProcessed or self.touchInput then
 			return
@@ -290,9 +456,26 @@ function RideController.jumpHeight(self: RideController): number
 	return 4 * self.stats.jumpHeight * t * (1 - t)
 end
 
-function RideController.checkCollisions(self: RideController): boolean
-	local stats = self.stats
-	return CourseObstacles.hits(self.obstacles, self.distance, self.x, stats.hitboxHalfLength, stats.hitboxHalfWidth, self:jumpHeight())
+-- Elephants break small rocks: the rock stops blocking and is hidden locally for this run.
+function RideController.smash(self: RideController, obstacle: CourseObstacles.Obstacle)
+	obstacle.smashed = true
+	local courseModel = Workspace:FindFirstChild("Course_" .. self.courseId)
+	if courseModel then
+		local center = Vector3.new(self.course.origin.X + obstacle.x, 0, self.course.origin.Z - obstacle.distance)
+		for _, part in courseModel:GetChildren() do
+			if part:IsA("BasePart") and (part.Name == obstacle.kind or part.Name == obstacle.kind .. "Cap") then
+				local flat = Vector3.new(part.Position.X, 0, part.Position.Z)
+				if (flat - center).Magnitude < 1 then
+					part.LocalTransparencyModifier = 1
+					table.insert(self.hiddenParts, part)
+				end
+			end
+		end
+	end
+	self.speed *= 0.9
+	self.shake = 0.25
+	self.dust:Emit(30)
+	self.hud:showMessage("SMASH!", 0.5)
 end
 
 function RideController.updateSteering(self: RideController, dt: number)
@@ -339,9 +522,51 @@ function RideController.updateJump(self: RideController, dt: number)
 	end
 end
 
-function RideController.step(self: RideController, dt: number)
+function RideController.updateRunning(self: RideController, dt: number)
 	local stats = self.stats
+	self.elapsed += dt
+	local ramp = math.min(self.elapsed / stats.speedRampTime, 1)
+	local eased = 1 - (1 - ramp) ^ 2
+	local targetSpeed = (stats.startSpeed + (stats.cruiseSpeed - stats.startSpeed) * eased) * self.speedMultiplier
+	if self.boostTime > 0 then
+		self.boostTime -= dt
+		targetSpeed *= LEAP_BOOST
+	end
+	self.speed = moveToward(self.speed, targetSpeed, LAUNCH_ACCELERATION * dt)
+	self.distance += self.speed * dt
+	if self.temperEnabled then
+		self.temper += dt / stats.temperDuration
+	end
+	self:updateJump(dt)
+	self.graceTime = math.max(self.graceTime - dt, 0)
 
+	local obstacle = if self.graceTime > 0
+		then nil
+		else CourseObstacles.hit(self.obstacles, self.distance, self.x, stats.hitboxHalfLength, stats.hitboxHalfWidth, self:jumpHeight())
+	if obstacle and stats.smashesRocks and obstacle.kind == "Rock" then
+		self:smash(obstacle)
+	elseif obstacle then
+		self.speed = 0
+		self.dust:Emit(25)
+		if self.onCrash and self.onCrash() then
+			self.state = "ended"
+			self.shake = 0.4
+		else
+			self:endRun("Crashed!", 0.4)
+		end
+	elseif self.distance >= self.course.length then
+		if self.onFinish and self.onFinish() then
+			self.state = "ended"
+		else
+			self:endRun(string.format("Finished!  %.1fs", self.elapsed), 0)
+		end
+	elseif self.temper >= 1 then
+		self.speed = 0
+		self:endRun("Bucked off!", 0.3)
+	end
+end
+
+function RideController.step(self: RideController, dt: number)
 	if self.state == "countdown" then
 		self.timer -= dt
 		if self.timer <= 0 then
@@ -349,47 +574,23 @@ function RideController.step(self: RideController, dt: number)
 			self.hud:showMessage("Go!", 0.6)
 		end
 	elseif self.state == "running" then
+		self:updateRunning(dt)
+	elseif self.state == "leaping" then
 		self.elapsed += dt
-		local ramp = math.min(self.elapsed / stats.speedRampTime, 1)
-		local eased = 1 - (1 - ramp) ^ 2
-		local targetSpeed = (stats.startSpeed + (stats.cruiseSpeed - stats.startSpeed) * eased) * self.speedMultiplier
-		self.speed = moveToward(self.speed, targetSpeed, LAUNCH_ACCELERATION * dt)
-		self.distance += self.speed * dt
-		if self.temperEnabled then
-			self.temper += dt / stats.temperDuration
-		end
-		self:updateJump(dt)
-
-		if self:checkCollisions() then
-			self.speed = 0
-			self.dust:Emit(25)
-			if self.onCrash and self.onCrash() then
-				self.state = "ended"
-				self.shake = 0.4
-			else
-				self:endRun("Crashed!", 0.4)
-			end
-		elseif self.distance >= self.course.length then
-			if self.onFinish and self.onFinish() then
-				self.state = "ended"
-			else
-				self:endRun(string.format("Finished!  %.1fs", self.elapsed), 0)
-			end
-		elseif self.temper >= 1 then
-			self.speed = 0
-			self:endRun("Bucked off!", 0.3)
-		end
+		self:updateLeap(dt)
 	else
 		self.speed = moveToward(self.speed, 0, 80 * dt)
 		self.distance += self.speed * dt
 		self.jumpTime = nil
 	end
 
-	self:updateSteering(dt)
-	self:applyPose()
+	if self.state ~= "leaping" then
+		self:updateSteering(dt)
+		self:applyPose()
+	end
 
 	if self.temperEnabled then
-		self.hud:setTemper(self.temper, stats.temperWarningAt)
+		self.hud:setTemper(self.temper, self.stats.temperWarningAt)
 	end
 	self.hud:setProgress(self.distance / self.course.length)
 	if self.onStep then
@@ -432,6 +633,7 @@ function RideController.applyPose(self: RideController)
 	self.dust.Rate = if self.jumpTime ~= nil or self.state ~= "running" then 0 else 40 * speedFraction
 end
 
+-- Follows course-space distance (not the mount part), so the camera stays smooth mid-leap.
 function RideController.updateCamera(self: RideController, dt: number)
 	local camera = self.camera
 	if camera.CameraType ~= Enum.CameraType.Scriptable then
@@ -440,17 +642,19 @@ function RideController.updateCamera(self: RideController, dt: number)
 
 	local stats = self.stats
 	local speedFraction = math.clamp(self.speed / stats.cruiseSpeed, 0, 1.2)
-	local rootPosition = self.root.Position
 	local baseY = CourseConfig.groundY + self.rootHeight
+	local worldZ = self.course.origin.Z - self.distance
+	local leaping = self.state == "leaping"
 
 	-- Sideways and height follow with a little lag; distance behind grows with speed.
 	self.cameraX += (self.x * 0.65 - self.cameraX) * damp(6, dt)
-	local targetY = baseY + 9 + 1.5 * speedFraction + self:jumpHeight() * 0.45
+	local targetY = baseY + 9 + 1.5 * speedFraction + self:jumpHeight() * 0.45 + self.leapHeight * 0.5
 	self.cameraY += (targetY - self.cameraY) * damp(8, dt)
-	self.fov += (68 + 16 * speedFraction - self.fov) * damp(3, dt)
+	local targetFov = 68 + 16 * speedFraction + (if leaping then 8 else 0) + (if self.boostTime > 0 then 5 else 0)
+	self.fov += (targetFov - self.fov) * damp(if leaping then 6 else 3, dt)
 
 	local back = 17 + 6 * speedFraction
-	local position = Vector3.new(self.course.origin.X + self.cameraX, self.cameraY, rootPosition.Z + back)
+	local position = Vector3.new(self.course.origin.X + self.cameraX, self.cameraY, worldZ + back)
 
 	-- Small rhythmic rumble at speed plus crash shake.
 	local phase = self.distance / stats.strideLength * 2 * math.pi
@@ -462,7 +666,7 @@ function RideController.updateCamera(self: RideController, dt: number)
 	end
 
 	local lookAhead = 28 + 10 * speedFraction
-	local lookAt = Vector3.new(self.course.origin.X + self.cameraX * 0.6 + self.x * 0.4, baseY + 1, rootPosition.Z - lookAhead)
+	local lookAt = Vector3.new(self.course.origin.X + self.cameraX * 0.6 + self.x * 0.4, baseY + 1, worldZ - lookAhead)
 	camera.CFrame = CFrame.lookAt(position, lookAt) * CFrame.Angles(0, 0, -self.steerVelocity * 0.0035)
 	camera.FieldOfView = self.fov
 end
@@ -477,12 +681,18 @@ function RideController.destroy(self: RideController)
 	ContextActionService:UnbindAction(ACTION_JUMP)
 	RunService:UnbindFromRenderStep(CAMERA_STEP)
 
-	if self.riderWeld then
-		self.riderWeld:Destroy()
+	local leap = self.leap
+	if leap then
+		leap.target:destroy()
 	end
+	self:detachRider()
 	self.agent:destroy()
+	for _, part in self.hiddenParts do
+		part.LocalTransparencyModifier = 0
+	end
 
 	self.camera.CameraType = Enum.CameraType.Custom
+	self.camera.CameraSubject = self.humanoid
 	self.camera.FieldOfView = BASE_FOV
 	GuiService.TouchControlsEnabled = self.touchControlsWereEnabled
 	if self.humanoid.Parent then

@@ -49,7 +49,9 @@ local function syncRide()
 	end
 	local seed = player:GetAttribute("SafariSeed")
 	if ride.course.herds and typeof(seed) == "number" then
-		herds = HerdController.new(ride, seed)
+		local herdController = HerdController.new(ride, seed)
+		herds = herdController
+		ride.herds = herdController
 	end
 end
 

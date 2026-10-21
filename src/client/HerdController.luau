@@ -18,6 +18,7 @@ export type Wild = {
 	homeX: number,
 	wanderPhase: number,
 	speedJitter: number,
+	released: boolean, -- a former mount drifting away; not targetable (not in the server's schedule)
 }
 
 local HerdController = {}
@@ -32,7 +33,7 @@ local PACE_FAR = 45 -- beyond this gap ahead of the rider, herds amble at their 
 local PACE_NEAR = 15 -- within this gap, herds fully match their share of the rider's speed
 local TARGET_MIN_AHEAD = 6
 local TARGET_MAX_AHEAD = 30
-local TARGET_MAX_SIDE = 14
+local TARGET_MAX_SIDE = 11 -- forgiving, but the rider still has to line up
 local RIDER_AVOID_SHIFT = 3
 local SEPARATION_LENGTH = 5
 local SEPARATION_WIDTH = 3.5
@@ -83,8 +84,34 @@ function HerdController.spawnHerd(self: HerdController, herd: HerdSchedule.Herd)
 			homeX = member.x,
 			wanderPhase = member.wanderPhase,
 			speedJitter = member.speedJitter,
+			released = false,
 		})
 	end
+end
+
+-- Removes a herd animal so the rider can take control of it (leap target).
+function HerdController.take(self: HerdController, wild: Wild)
+	local index = table.find(self.wild, wild)
+	if index then
+		table.remove(self.wild, index)
+	end
+	if self.target == wild then
+		self.target = nil
+		self.indicator:hide()
+	end
+end
+
+-- The rider's previous mount rejoins the course as a wild animal, falls behind, and despawns.
+function HerdController.release(self: HerdController, agent: AnimalAgent.AnimalAgent)
+	agent:setRidden(false)
+	table.insert(self.wild, {
+		agent = agent,
+		id = "released",
+		homeX = agent.x,
+		wanderPhase = 0,
+		speedJitter = -0.15,
+		released = true,
+	})
 end
 
 function HerdController.think(self: HerdController, wild: Wild, dt: number)
@@ -164,7 +191,7 @@ function HerdController.updateTarget(self: HerdController)
 		for _, wild in self.wild do
 			local ahead = wild.agent.distance - ride.distance
 			local side = wild.agent.x - ride.x
-			if ahead >= TARGET_MIN_AHEAD and ahead <= TARGET_MAX_AHEAD and math.abs(side) <= TARGET_MAX_SIDE then
+			if not wild.released and ahead >= TARGET_MIN_AHEAD and ahead <= TARGET_MAX_AHEAD and math.abs(side) <= TARGET_MAX_SIDE then
 				local score = math.abs(side - bias) + ahead * 0.3
 				if score < bestScore then
 					best, bestScore = wild, score
@@ -175,7 +202,7 @@ function HerdController.updateTarget(self: HerdController)
 	self.target = best
 	if best then
 		local agent = best.agent
-		self.indicator:show(agent.root, agent.stats.displayName, agent.stats.hitboxHalfLength + 1, agent.rootHeight + 1)
+		self.indicator:show(agent.model, agent.stats.displayName, agent.stats.hitboxHalfLength + 1, agent.rootHeight + 1)
 	else
 		self.indicator:hide()
 	end

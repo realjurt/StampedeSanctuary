@@ -40,12 +40,7 @@ function AnimalAgent.new(species: string, course: CourseConfig.Course, distance:
 	local stats = AnimalConfig[species]
 	assert(stats, `AnimalAgent: unknown species "{species}"`)
 	local ground = CFrame.new(course.origin.X + x, CourseConfig.groundY, course.origin.Z - distance)
-	local model = AnimalBuilder.build(species, ground, anchored)
-	if not anchored then
-		-- The rider's HumanoidRootPart must stay the assembly root: physics replication is sent
-		-- relative to the root, and this client-only part doesn't exist on the server.
-		(model.PrimaryPart :: BasePart).RootPriority = -127
-	end
+	local model = AnimalBuilder.build(species, ground, true)
 	model.Parent = getFolder()
 
 	local self = setmetatable({}, AnimalAgent)
@@ -54,7 +49,7 @@ function AnimalAgent.new(species: string, course: CourseConfig.Course, distance:
 	self.course = course
 	self.model = model
 	self.root = model.PrimaryPart :: BasePart
-	self.anchored = anchored
+	self.anchored = true
 	self.rootHeight = model:GetAttribute("RootHeight") :: number
 	self.riderOffset = model:GetAttribute("RiderOffset") :: number
 	self.distance = distance
@@ -70,10 +65,22 @@ function AnimalAgent.new(species: string, course: CourseConfig.Course, distance:
 			table.insert(self.legs, { weld = weld, baseC0 = weld.C0, phaseOffset = phase.offset, isFront = phase.front })
 		end
 	end
+	if not anchored then
+		AnimalAgent.setRidden(self :: any, true)
+	end
 	return self
 end
 
 export type AnimalAgent = typeof(AnimalAgent.new("Zebra", nil :: any, 0, 0, true))
+
+-- Ridden: unanchored so the welded rider keeps simulating, and the lowest RootPriority so the rider's
+-- HumanoidRootPart stays the assembly root — physics replication is sent relative to the root, and
+-- this client-only part doesn't exist on the server (BUG-003). Wild: anchored, moved by CFrame.
+function AnimalAgent.setRidden(self: AnimalAgent, ridden: boolean)
+	self.anchored = not ridden
+	self.root.Anchored = not ridden
+	self.root.RootPriority = if ridden then -127 else 0
+end
 
 function AnimalAgent.jumpHeight(self: AnimalAgent): number
 	local jumpTime = self.jumpTime
