@@ -142,6 +142,29 @@ function PlayerDataService.update(player: Player, mutator: (PlayerData) -> ())
 	task.spawn(save, player)
 end
 
+-- Developer tool (see DevCommands). Replaces the in-memory profile with defaults *first*, so old
+-- progress can never be saved back over the reset, then overwrites only this player's key.
+function PlayerDataService.resetToDefaults(player: Player): boolean
+	local profile = profiles[player]
+	if not profile or not profile.canSave or not store then
+		return false
+	end
+	profile.data = defaults()
+	publish(player, profile.data)
+	while profile.saving do
+		task.wait()
+	end
+	local ok, err = pcall(function()
+		(store :: DataStore):UpdateAsync(keyFor(player), function()
+			return defaults()
+		end)
+	end)
+	if not ok then
+		warn(`PlayerDataService: reset failed for {player.Name}: {err}`)
+	end
+	return ok
+end
+
 function PlayerDataService.start()
 	local ok, result = pcall(function()
 		return DataStoreService:GetDataStore(STORE_NAME)

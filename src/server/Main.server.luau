@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
 local CourseBuilder = require(script.Parent.CourseBuilder)
+local DevCommands = require(script.Parent.DevCommands)
 local OnboardingService = require(script.Parent.OnboardingService)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local SafariService = require(script.Parent.SafariService)
@@ -15,5 +16,6 @@ end
 local sanctuary = SanctuaryBuilder.build()
 
 PlayerDataService.start()
+DevCommands.start()
 OnboardingService.start(sanctuary.skipPrompt)
 SafariService.start(sanctuary.startPrompt, sanctuary.spawnCFrame)
