@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 
 local HerdController = require(script.Parent.HerdController)
 local LeapTutorial = require(script.Parent.LeapTutorial)
+local MenuController = require(script.Parent.MenuController)
 local OnboardingController = require(script.Parent.OnboardingController)
 local RideController = require(script.Parent.RideController)
 local SanctuaryView = require(script.Parent.SanctuaryView)
@@ -16,8 +17,13 @@ local current: RideController.RideController? = nil
 local tutorial: TutorialDirector.TutorialDirector? = nil
 local herds: HerdController.HerdController? = nil
 local leapTutorial: LeapTutorial.LeapTutorial? = nil
+local menuConnections: { RBXScriptConnection } = {}
 
 local function stopRide()
+	for _, connection in menuConnections do
+		connection:Disconnect()
+	end
+	table.clear(menuConnections)
 	if leapTutorial then
 		leapTutorial:destroy()
 		leapTutorial = nil
@@ -50,6 +56,12 @@ local function syncRide()
 	end
 	local ride = RideController.new(courseId, humanoid)
 	current = ride
+	menuConnections = MenuController.bind({
+		Index = ride.hud.indexButton,
+		Shop = ride.hud.shopButton,
+		Settings = ride.hud.settingsButton,
+	})
+	ride:setPaused(MenuController.isOpen())
 	if ride.course.tutorial then
 		tutorial = TutorialDirector.new(ride)
 	end
@@ -63,6 +75,12 @@ local function syncRide()
 		end
 	end
 end
+
+MenuController.changed:Connect(function(open: boolean)
+	if current then
+		current:setPaused(open)
+	end
+end)
 
 player:GetAttributeChangedSignal("InSafari"):Connect(syncRide)
 player.CharacterAdded:Connect(function(character)

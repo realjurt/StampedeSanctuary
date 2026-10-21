@@ -1,5 +1,7 @@
 --!strict
--- Placeholder riding HUD: temper meter, progress, messages, leave button, end-of-run panel.
+-- Safari HUD in the Outlined Radiance style (D-022). Layout keeps the centre of the screen clear:
+-- animal + temper + distance + ability top-centre, menu buttons left, control hints bottom-left,
+-- leap target chip bottom-centre, mobile JUMP/LEAP bottom-right.
 
 local UserInputService = game:GetService("UserInputService")
 
@@ -8,152 +10,291 @@ local UiKit = require(script.Parent.UiKit)
 local RideHud = {}
 RideHud.__index = RideHud
 
-export type RideHud = typeof(setmetatable(
-	{} :: {
-		gui: ScreenGui,
-		temperLabel: TextLabel,
-		temperFill: Frame,
-		progressFill: Frame,
-		message: TextLabel,
-		hint: TextLabel,
-		leaveButton: TextButton,
-		jumpButton: TextButton,
-		leapButton: TextButton,
-		endPanel: Frame,
-		againButton: TextButton,
-		returnButton: TextButton,
-		messageToken: number,
-	},
-	RideHud
-))
+local TEMPER_COLORS = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, UiKit.PALETTE.green.top),
+	ColorSequenceKeypoint.new(0.62, UiKit.PALETTE.yellow.top),
+	ColorSequenceKeypoint.new(1, UiKit.PALETTE.red.top),
+})
 
-local CALM = Color3.fromRGB(110, 200, 90)
-local WARN = Color3.fromRGB(255, 170, 50)
-local DANGER = Color3.fromRGB(235, 70, 60)
+type InputKind = "keyboard" | "gamepad" | "touch"
 
-local function bar(parent: Instance, name: string, y: number, height: number, color: Color3): Frame
-	local back = Instance.new("Frame")
-	back.Name = name
-	back.AnchorPoint = Vector2.new(0.5, 0)
-	back.Position = UDim2.new(0.5, 0, 0, y)
-	back.Size = UDim2.new(0.4, 0, 0, height)
-	back.BackgroundColor3 = UiKit.DARK
-	back.BackgroundTransparency = 0.35
-	back.Parent = parent
-	UiKit.corner(back, UDim.new(1, 0))
+local HINTS: { [InputKind]: { { keys: { string }, text: string } } } = {
+	keyboard = { { keys = { "A", "D" }, text = "Steer" }, { keys = { "Space" }, text = "Jump" }, { keys = { "F" }, text = "Leap" } },
+	gamepad = { { keys = { "LS" }, text = "Steer" }, { keys = { "A" }, text = "Jump" }, { keys = { "X" }, text = "Leap" } },
+	touch = {},
+}
+local LEAP_KEY: { [InputKind]: string? } = { keyboard = "F", gamepad = "X", touch = nil }
 
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(0, 1)
-	fill.BackgroundColor3 = color
-	fill.BorderSizePixel = 0
-	fill.Parent = back
-	UiKit.corner(fill, UDim.new(1, 0))
-	return fill
+local function inputKind(): InputKind
+	local last = UserInputService:GetLastInputType()
+	if last == Enum.UserInputType.Touch then
+		return "touch"
+	elseif last.Name:find("Gamepad") then
+		return "gamepad"
+	end
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+		return "touch"
+	end
+	return "keyboard"
 end
 
-function RideHud.new(): RideHud
-	local gui = UiKit.screen("RideHud")
+local function container(parent: Instance, name: string, anchor: Vector2, position: UDim2, size: Vector2): Frame
+	local f = Instance.new("Frame")
+	f.Name = name
+	f.BackgroundTransparency = 1
+	f.AnchorPoint = anchor
+	f.Position = position
+	f.Size = UDim2.fromOffset(size.X, size.Y)
+	f.Parent = parent
+	UiKit.autoScale(f)
+	return f
+end
 
-	local temperLabel = UiKit.label(gui, "TemperLabel", "TEMPER", 22)
-	temperLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-	temperLabel.Position = UDim2.new(0.5, 0, 0, 40)
-	temperLabel.Size = UDim2.new(0.4, 0, 0, 24)
-	local temperFill = bar(gui, "Temper", 54, 22, CALM)
-	local progressFill = bar(gui, "Progress", 84, 8, Color3.fromRGB(255, 210, 70))
-
-	local message = UiKit.label(gui, "Message", "", 64)
-	message.AnchorPoint = Vector2.new(0.5, 0.5)
-	message.Position = UDim2.fromScale(0.5, 0.33)
-	message.Size = UDim2.new(0.8, 0, 0, 80)
-	message.Visible = false
-
-	local hint = UiKit.label(gui, "Hint", "", 24)
-	hint.AnchorPoint = Vector2.new(0.5, 0.5)
-	hint.Position = UDim2.new(0.5, 0, 1, -50)
-	hint.Size = UDim2.new(0.9, 0, 0, 30)
-
-	local leaveButton = UiKit.button(gui, "Leave", "◀ Sanctuary", UiKit.DARK, 20)
-	leaveButton.Position = UDim2.fromOffset(16, 70)
-	leaveButton.Size = UDim2.fromOffset(150, 40)
-	leaveButton.BackgroundTransparency = 0.3
-
-	-- Touch-only action buttons (D-020): JUMP always available, LEAP lit only when an animal is targeted.
-	local isTouch = UserInputService.TouchEnabled
-	local jumpButton = UiKit.button(gui, "Jump", "JUMP", Color3.fromRGB(80, 140, 210), 26)
-	jumpButton.AnchorPoint = Vector2.new(1, 1)
-	jumpButton.Position = UDim2.new(1, -24, 1, -24)
-	jumpButton.Size = UDim2.fromOffset(110, 110)
-	UiKit.corner(jumpButton, UDim.new(1, 0))
-	jumpButton.Visible = isTouch
-	local leapButton = UiKit.button(gui, "Leap", "LEAP", Color3.fromRGB(255, 190, 40), 26)
-	leapButton.AnchorPoint = Vector2.new(1, 1)
-	leapButton.Position = UDim2.new(1, -150, 1, -60)
-	leapButton.Size = UDim2.fromOffset(100, 100)
-	UiKit.corner(leapButton, UDim.new(1, 0))
-	leapButton.Visible = isTouch
-
-	local endPanel = Instance.new("Frame")
-	endPanel.Name = "EndPanel"
-	endPanel.AnchorPoint = Vector2.new(0.5, 0)
-	endPanel.Position = UDim2.fromScale(0.5, 0.45)
-	endPanel.Size = UDim2.fromOffset(440, 70)
-	endPanel.BackgroundTransparency = 1
-	endPanel.Visible = false
-	endPanel.Parent = gui
+local function row(parent: Instance, name: string, padding: number): Frame
+	local f = Instance.new("Frame")
+	f.Name = name
+	f.BackgroundTransparency = 1
+	f.AutomaticSize = Enum.AutomaticSize.X
+	f.Parent = parent
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.Padding = UDim.new(0, 20)
-	layout.Parent = endPanel
-
-	local againButton = UiKit.button(endPanel, "RideAgain", "Ride again", UiKit.GREEN, 28)
-	againButton.Size = UDim2.fromOffset(200, 64)
-	local returnButton = UiKit.button(endPanel, "Return", "Back to Sanctuary", Color3.fromRGB(80, 140, 210), 24)
-	returnButton.Size = UDim2.fromOffset(200, 64)
-
-	return setmetatable({
-		gui = gui,
-		temperLabel = temperLabel,
-		temperFill = temperFill,
-		progressFill = progressFill,
-		message = message,
-		hint = hint,
-		leaveButton = leaveButton,
-		jumpButton = jumpButton,
-		leapButton = leapButton,
-		endPanel = endPanel,
-		againButton = againButton,
-		returnButton = returnButton,
-		messageToken = 0,
-	}, RideHud)
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, padding)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = f
+	return f
 end
 
-function RideHud.setTemper(self: RideHud, fraction: number, warningAt: number)
-	fraction = math.clamp(fraction, 0, 1)
-	self.temperFill.Size = UDim2.fromScale(fraction, 1)
-	if fraction >= 0.9 then
-		self.temperFill.BackgroundColor3 = DANGER
-		self.temperLabel.Text = "TEMPER — HOLD ON!"
-	elseif fraction >= warningAt then
-		self.temperFill.BackgroundColor3 = WARN
-		self.temperLabel.Text = "TEMPER — GETTING RESTLESS"
-	else
-		self.temperFill.BackgroundColor3 = CALM
-		self.temperLabel.Text = "TEMPER"
+local function autoLabel(parent: Instance, name: string, text: string, size: number): TextLabel
+	local l = UiKit.label(parent, name, text, size)
+	l.AutomaticSize = Enum.AutomaticSize.X
+	l.Size = UDim2.fromScale(0, 1)
+	l.TextWrapped = false
+	return l
+end
+
+function RideHud.new()
+	local gui = UiKit.screen("RideHud")
+	local self = setmetatable({}, RideHud)
+	self.gui = gui
+	self.connections = {} :: { RBXScriptConnection }
+	self.messageToken = 0
+	self.befriending = false
+	self.leapReady = nil :: boolean?
+	self.leapTargetName = nil :: string?
+
+	-- Top-centre: current animal, temper, distance, ability
+	local top = container(gui, "Status", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 10), Vector2.new(460, 150))
+	local animalRow = row(top, "Animal", 10)
+	animalRow.AnchorPoint = Vector2.new(0.5, 0)
+	animalRow.Position = UDim2.fromScale(0.5, 0)
+	animalRow.Size = UDim2.fromOffset(0, 40)
+	local tile = Instance.new("Frame")
+	tile.Name = "Tile"
+	tile.Size = UDim2.fromOffset(40, 40)
+	tile.Parent = animalRow
+	UiKit.surface(tile, "cyan", 8, 3)
+	local tileIcon = Instance.new("TextLabel")
+	tileIcon.BackgroundTransparency = 1
+	tileIcon.Size = UDim2.fromScale(1, 1)
+	tileIcon.TextSize = 26
+	tileIcon.ZIndex = 4
+	tileIcon.Parent = tile
+	self.animalTile = tile
+	self.animalIcon = tileIcon
+	self.animalName = autoLabel(animalRow, "Name", "", 30)
+
+	local temper = UiKit.bar(top, "Temper", TEMPER_COLORS, 18)
+	temper.frame.Position = UDim2.fromOffset(0, 48)
+	temper.frame.Size = UDim2.fromOffset(460, 32)
+	self.temper = temper
+
+	local distance = UiKit.bar(top, "Distance", UiKit.verticalSequence("cyan"), 14)
+	distance.frame.Position = UDim2.fromOffset(0, 88)
+	distance.frame.Size = UDim2.fromOffset(460, 20)
+	self.distance = distance
+
+	local ability = Instance.new("Frame")
+	ability.Name = "Ability"
+	ability.AnchorPoint = Vector2.new(0.5, 0)
+	ability.Position = UDim2.new(0.5, 0, 0, 116)
+	ability.AutomaticSize = Enum.AutomaticSize.X
+	ability.Size = UDim2.fromOffset(0, 30)
+	ability.BackgroundColor3 = UiKit.PANEL
+	ability.Parent = top
+	UiKit.corner(ability, UDim.new(0, 6))
+	UiKit.border(ability, 2)
+	local abilityPadding = Instance.new("UIPadding")
+	abilityPadding.PaddingLeft = UDim.new(0, 12)
+	abilityPadding.PaddingRight = UDim.new(0, 12)
+	abilityPadding.Parent = ability
+	self.ability = autoLabel(ability, "Text", "", 17)
+
+	-- Left: menu buttons
+	local nav = container(gui, "Menu", Vector2.new(0, 0.5), UDim2.new(0, 14, 0.5, 0), Vector2.new(160, 222))
+	local navLayout = Instance.new("UIListLayout")
+	navLayout.Padding = UDim.new(0, 10)
+	navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	navLayout.Parent = nav
+	self.leaveButton = UiKit.sideButton(nav, "Sanctuary", "🏠", "Sanctuary", "green")
+	self.indexButton = UiKit.sideButton(nav, "Index", "📖", "Index", "cyan")
+	self.shopButton = UiKit.sideButton(nav, "Shop", "🛍️", "Shop", "pink")
+	self.settingsButton = UiKit.sideButton(nav, "Settings", "⚙️", "Settings", "gray")
+	for i, b in { self.leaveButton, self.indexButton, self.shopButton, self.settingsButton } do
+		b.LayoutOrder = i
+	end
+
+	-- Bottom-left: control hints for the active input device
+	local hints = container(gui, "Hints", Vector2.new(0, 1), UDim2.new(0, 14, 1, -14), Vector2.new(620, 30))
+	self.hints = row(hints, "Row", 18)
+	self.hints.Size = UDim2.fromOffset(0, 30)
+
+	-- Bottom-centre: leap target
+	local targetHolder = container(gui, "Target", Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -86), Vector2.new(10, 46))
+	local chip = Instance.new("Frame")
+	chip.Name = "Chip"
+	chip.AnchorPoint = Vector2.new(0.5, 0)
+	chip.Position = UDim2.fromScale(0.5, 0)
+	chip.AutomaticSize = Enum.AutomaticSize.X
+	chip.Size = UDim2.fromOffset(0, 46)
+	chip.BackgroundColor3 = UiKit.PANEL
+	chip.Visible = false
+	chip.Parent = targetHolder
+	UiKit.corner(chip, UDim.new(0, 8))
+	UiKit.border(chip, 3)
+	local chipPadding = Instance.new("UIPadding")
+	chipPadding.PaddingLeft = UDim.new(0, 14)
+	chipPadding.PaddingRight = UDim.new(0, 14)
+	chipPadding.Parent = chip
+	local chipRow = row(chip, "Row", 10)
+	chipRow.Size = UDim2.fromScale(0, 1)
+	self.targetText = autoLabel(chipRow, "Text", "", 24)
+	self.targetText.TextColor3 = UiKit.PALETTE.yellow.top
+	self.targetText.LayoutOrder = 1
+	self.targetChip = chip
+	self.targetKey = nil :: Frame?
+	self.chipRow = chipRow
+
+	-- Bottom-right: mobile action buttons (touch only)
+	local isTouch = UserInputService.TouchEnabled
+	local actions = container(gui, "Actions", Vector2.new(1, 1), UDim2.new(1, -16, 1, -16), Vector2.new(244, 118))
+	actions.Visible = isTouch
+	self.leapButton = UiKit.button(actions, "Leap", "LEAP", "yellow", 28)
+	self.leapButton.AnchorPoint = Vector2.new(0, 1)
+	self.leapButton.Position = UDim2.fromScale(0, 1)
+	self.leapButton.Size = UDim2.fromOffset(108, 92)
+	self.jumpButton = UiKit.button(actions, "Jump", "JUMP", "blue", 30)
+	self.jumpButton.AnchorPoint = Vector2.new(1, 1)
+	self.jumpButton.Position = UDim2.fromScale(1, 1)
+	self.jumpButton.Size = UDim2.fromOffset(122, 118)
+	self.actions = actions
+
+	-- Centre: big messages (Ready / Go / Crashed)
+	local message = UiKit.label(gui, "Message", "", 64)
+	message.AnchorPoint = Vector2.new(0.5, 0.5)
+	message.Position = UDim2.fromScale(0.5, 0.34)
+	message.Size = UDim2.new(0.8, 0, 0, 80)
+	message.Visible = false
+	self.message = message
+
+	-- End of run
+	local endPanel = container(gui, "EndPanel", Vector2.new(0.5, 0), UDim2.fromScale(0.5, 0.44), Vector2.new(470, 72))
+	endPanel.Visible = false
+	self.againButton = UiKit.button(endPanel, "RideAgain", "Ride Again", "green", 30)
+	self.againButton.Size = UDim2.fromOffset(225, 70)
+	self.returnButton = UiKit.button(endPanel, "Return", "Sanctuary", "blue", 30)
+	self.returnButton.AnchorPoint = Vector2.new(1, 0)
+	self.returnButton.Position = UDim2.fromScale(1, 0)
+	self.returnButton.Size = UDim2.fromOffset(225, 70)
+	self.endPanel = endPanel
+
+	self.inputKind = inputKind()
+	self:refreshInputHints()
+	table.insert(self.connections, UserInputService.LastInputTypeChanged:Connect(function()
+		local kind = inputKind()
+		if kind ~= self.inputKind then
+			self.inputKind = kind
+			self:refreshInputHints()
+			self.leapTargetName = nil -- re-render the chip text for the new device
+		end
+	end))
+
+	self:setLeapReady(false, nil)
+	return self
+end
+
+export type RideHud = typeof(RideHud.new())
+
+function RideHud.refreshInputHints(self: RideHud)
+	for _, child in self.hints:GetChildren() do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	for i, hint in HINTS[self.inputKind] do
+		local group = row(self.hints, "Hint" .. i, 5)
+		group.LayoutOrder = i
+		group.Size = UDim2.fromOffset(0, 30)
+		for j, key in hint.keys do
+			UiKit.keycap(group, key).LayoutOrder = j
+		end
+		autoLabel(group, "Text", hint.text, 18).LayoutOrder = #hint.keys + 1
+	end
+	if self.targetKey then
+		self.targetKey:Destroy()
+		self.targetKey = nil
+	end
+	local leapKey = LEAP_KEY[self.inputKind]
+	if leapKey then
+		local key = UiKit.keycap(self.chipRow, leapKey)
+		key.LayoutOrder = 2
+		self.targetKey = key
 	end
 end
 
--- Tutorial variant of the top meter: shows befriending progress instead of temper.
-function RideHud.setBefriending(self: RideHud, fraction: number, animalName: string)
-	fraction = math.clamp(fraction, 0, 1)
-	self.temperFill.Size = UDim2.fromScale(fraction, 1)
-	self.temperFill.BackgroundColor3 = Color3.fromRGB(255, 140, 180)
-	self.temperLabel.Text = string.format("BEFRIENDING %s  %d%%", string.upper(animalName), math.floor(fraction * 100 + 0.5))
+function RideHud.setAnimal(self: RideHud, species: string, stats: any)
+	local style = UiKit.SPECIES[species] or UiKit.SPECIES.Zebra
+	UiKit.recolor(self.animalTile, style.color)
+	self.animalIcon.Text = style.icon
+	self.animalName.Text = stats.displayName
+	local ability = string.match(stats.abilityHint, "—%s*(.+)$") or stats.abilityHint
+	self.ability.Text = string.upper(string.sub(ability, 1, 1)) .. string.sub(ability, 2)
 end
 
-function RideHud.setProgress(self: RideHud, fraction: number)
-	self.progressFill.Size = UDim2.fromScale(math.clamp(fraction, 0, 1), 1)
+function RideHud.setTemper(self: RideHud, fraction: number, warningAt: number)
+	if self.befriending then
+		self.befriending = false
+		self.temper.setColor(TEMPER_COLORS)
+	end
+	local text = if fraction >= 0.9 then "HOLD ON!" elseif fraction >= warningAt then "RESTLESS!" else "TEMPER"
+	self.temper.set(fraction, text)
+end
+
+-- Tutorial variant of the top meter: befriending progress instead of temper.
+function RideHud.setBefriending(self: RideHud, fraction: number, animalName: string)
+	if not self.befriending then
+		self.befriending = true
+		self.temper.setColor(UiKit.verticalSequence("pink"))
+	end
+	self.temper.set(fraction, string.format("BEFRIENDING %s  %d%%", string.upper(animalName), math.floor(fraction * 100 + 0.5)))
+end
+
+function RideHud.setDistance(self: RideHud, distance: number, length: number)
+	self.distance.set(distance / length, string.format("%d / %d m", math.floor(math.max(distance, 0)), length))
+end
+
+-- Shows "LEAP → Giraffe [F]" and enables the mobile LEAP button only while an animal is targeted.
+function RideHud.setLeapReady(self: RideHud, ready: boolean, targetName: string?)
+	if ready == self.leapReady and targetName == self.leapTargetName then
+		return -- called every frame; only touch the UI on change
+	end
+	self.leapReady = ready
+	self.leapTargetName = targetName
+	UiKit.setButtonEnabled(self.leapButton, ready)
+	self.targetChip.Visible = ready
+	if ready and targetName then
+		self.targetText.Text = if self.inputKind == "touch" then `Tap LEAP → {targetName}` else `LEAP → {targetName}`
+	end
 end
 
 -- Shows a centered message; hides it after `duration` seconds if given.
@@ -171,30 +312,25 @@ function RideHud.showMessage(self: RideHud, text: string, duration: number?)
 	end
 end
 
+-- First-ride hint. Keyboard/gamepad players already see the hints row, so only touch gets a toast.
 function RideHud.showHint(self: RideHud, isTouch: boolean, duration: number)
-	self.hint.Text = if isTouch
-		then "Drag to steer  ·  JUMP to hop  ·  LEAP onto glowing animals"
-		else "A / D to steer  ·  Space to jump  ·  F to leap onto glowing animals"
-	self.hint.Visible = true
-	task.delay(duration, function()
-		if self.hint.Parent then
-			self.hint.Visible = false
-		end
-	end)
-end
-
-function RideHud.setLeapReady(self: RideHud, ready: boolean)
-	self.leapButton.BackgroundTransparency = if ready then 0 else 0.65
-	self.leapButton.TextTransparency = if ready then 0 else 0.5
-	self.leapButton.Active = ready
+	if isTouch then
+		UiKit.toast("Drag to steer  ·  JUMP to hop  ·  LEAP onto glowing animals", duration)
+	end
 end
 
 function RideHud.setEndPanelVisible(self: RideHud, visible: boolean)
-	self.endPanel.Visible = visible
-	self.leaveButton.Visible = not visible
+	if visible and not self.endPanel.Visible then
+		UiKit.popIn(self.endPanel)
+	elseif not visible then
+		self.endPanel.Visible = false
+	end
 end
 
 function RideHud.destroy(self: RideHud)
+	for _, connection in self.connections do
+		connection:Disconnect()
+	end
 	self.gui:Destroy()
 end
 

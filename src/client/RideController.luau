@@ -159,6 +159,7 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	self.touchTargetX = nil :: number?
 
 	-- Simulation clock
+	self.paused = false
 	self.timeScale = 1
 	self.timeScaleTarget = 1
 	self.timeScaleRate = 0
@@ -210,6 +211,19 @@ function RideController.setMount(self: RideController, agent: AnimalAgent.Animal
 	self.rootHeight = agent.rootHeight
 	self.dust = makeDust(agent.root, agent.rootHeight)
 	self.riderWeld = attachRider(agent, self.humanoid)
+	self.hud:setAnimal(agent.species, agent.stats)
+end
+
+-- Menus pause the local safari (D-022). Safe with the shared simulation clock (D-019): the server
+-- only checks wall-clock plausibility, which a pause can only make easier to pass.
+function RideController.setPaused(self: RideController, paused: boolean)
+	if paused == self.paused then
+		return
+	end
+	self.paused = paused
+	if not paused and self.state == "running" then
+		self.hud:showMessage("Go!", 0.6)
+	end
 end
 
 function RideController.detachRider(self: RideController)
@@ -262,7 +276,7 @@ function RideController.reset(self: RideController)
 	self.hud:setEndPanelVisible(false)
 	self.hud:showMessage("Ready...")
 	self.hud:setTemper(0, self.stats.temperWarningAt)
-	self.hud:setProgress(0)
+	self.hud:setDistance(0, self.course.length)
 	self.restartRemote:FireServer()
 end
 
@@ -279,7 +293,7 @@ end
 
 -- Jump is only ever a hop; leaping has its own control (D-020), so jumping can't switch animals.
 function RideController.jump(self: RideController)
-	if self.state ~= "running" then
+	if self.state ~= "running" or self.paused then
 		return
 	end
 	if self.jumpTime == nil then
@@ -291,7 +305,7 @@ end
 
 -- Leaps onto the highlighted herd animal; does nothing without a valid target.
 function RideController.leapToTarget(self: RideController)
-	if self.state ~= "running" then
+	if self.state ~= "running" or self.paused then
 		return
 	end
 	local herds = self.herds
@@ -606,6 +620,12 @@ end
 
 -- realDt is wall-clock frame time; everything in the safari simulation uses the scaled dt.
 function RideController.step(self: RideController, realDt: number)
+	if self.paused then
+		-- Hold the pose so the welded rider doesn't drift while the safari is frozen.
+		self.root.AssemblyLinearVelocity = Vector3.zero
+		self:applyPose()
+		return
+	end
 	self.timeScale = moveToward(self.timeScale, self.timeScaleTarget, self.timeScaleRate * realDt)
 	local dt = realDt * self.timeScale
 
@@ -639,8 +659,10 @@ function RideController.step(self: RideController, realDt: number)
 	if self.temperEnabled then
 		self.hud:setTemper(self.temper, self.stats.temperWarningAt)
 	end
-	self.hud:setProgress(self.distance / self.course.length)
-	self.hud:setLeapReady(self.state == "running" and herds ~= nil and herds.target ~= nil)
+	self.hud:setDistance(self.distance, self.course.length)
+	local target = herds and herds.target
+	local canLeap = self.state == "running" and target ~= nil
+	self.hud:setLeapReady(canLeap, if canLeap then target.agent.stats.displayName else nil)
 	if self.onStep then
 		self.onStep(dt)
 	end

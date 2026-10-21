@@ -244,30 +244,22 @@ function TutorialDirector.confetti(self: any)
 end
 
 function TutorialDirector.showReward(self: any)
-	local card = Instance.new("Frame")
-	card.Name = "RewardCard"
-	card.AnchorPoint = Vector2.new(0.5, 0.5)
-	card.Position = UDim2.fromScale(0.5, 0.5)
-	card.Size = UDim2.fromOffset(480, 270)
-	card.BackgroundColor3 = UiKit.DARK
-	card.BackgroundTransparency = 0.1
-	card.Parent = self.gui
-	UiKit.corner(card, UDim.new(0, 20))
-	local scale = Instance.new("UIScale")
-	scale.Scale = math.min(1, (Workspace.CurrentCamera.ViewportSize.X - 32) / 480)
-	scale.Parent = card
+	local window = UiKit.window(self.gui, "New Friend!", "green", Vector2.new(500, 320), false)
+	window.holder.Name = "RewardCard"
+	local body = window.body
 
-	local title = UiKit.label(card, "Title", "You befriended a Zebra!", 38)
-	title.Position = UDim2.fromOffset(20, 20)
-	title.Size = UDim2.new(1, -40, 0, 48)
-	local body = UiKit.label(card, "Body", string.format("It's ready to move into your sanctuary.\nTreats shared: %d / %d", self.treatsCollected, #self.treats), 22)
-	body.Position = UDim2.fromOffset(20, 78)
-	body.Size = UDim2.new(1, -40, 0, 70)
+	local title = UiKit.label(body, "Title", "You befriended a Zebra!", 36)
+	title.TextColor3 = UiKit.PALETTE.yellow.top
+	title.Size = UDim2.new(1, 0, 0, 46)
+	local text = UiKit.label(body, "Body", string.format("It's ready to move into your sanctuary.\nTreats shared: %d / %d", self.treatsCollected, #self.treats), 22)
+	text.Position = UDim2.fromOffset(0, 52)
+	text.Size = UDim2.new(1, 0, 0, 64)
 
-	local home = UiKit.button(card, "Home", "Take it home", UiKit.GREEN, 30)
+	local home = UiKit.button(body, "Home", "Take it home", "green", 30)
 	home.AnchorPoint = Vector2.new(0.5, 0)
-	home.Position = UDim2.new(0.5, 0, 0, 172)
-	home.Size = UDim2.fromOffset(240, 64)
+	home.Position = UDim2.new(0.5, 0, 0, 132)
+	home.Size = UDim2.fromOffset(260, 64)
+	window.open()
 	home.Activated:Connect(function()
 		home.Active = false
 		self.remotes.ReturnToSanctuary:FireServer()

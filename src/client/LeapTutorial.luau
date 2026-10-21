@@ -113,10 +113,10 @@ function LeapTutorial.skip(self: LeapTutorial)
 end
 
 function LeapTutorial.update(self: LeapTutorial, dt: number)
-	if self.state == "done" then
-		return
-	end
 	local ride = self.ride
+	if self.state == "done" or ride.paused then
+		return -- a menu is open: the lesson's timers wait too
+	end
 	local herds = ride.herds
 	if self.state == "waiting" then
 		self.cooldown = math.max(self.cooldown - dt, 0)
