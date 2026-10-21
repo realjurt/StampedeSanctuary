@@ -1,0 +1,21 @@
+# Roblox place files (back up separately, not in Git)
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+*.rbxm.lock
+
+# Rojo / tooling output
+sourcemap.json
+/build/
+
+# Secrets & local config
+.env
+.env.*
+*.key
+*.pem
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/settings.json
