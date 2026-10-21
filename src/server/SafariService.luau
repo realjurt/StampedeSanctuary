@@ -48,13 +48,14 @@ local runs: { [Player]: Run } = {}
 local sanctuarySpawn: CFrame
 local seedRng = Random.new()
 
--- Read-only view of a player's active run, for reward validation.
-function SafariService.getRun(player: Player): (string?, number?)
+-- Read-only view of a player's active run, for reward validation: course, seconds since (re)start,
+-- and how many validated animal switches happened.
+function SafariService.getRun(player: Player): (string?, number?, number?)
 	local run = runs[player]
 	if not run then
-		return nil, nil
+		return nil, nil, nil
 	end
-	return run.courseId, os.clock() - run.startedAt
+	return run.courseId, os.clock() - run.startedAt, run.switches
 end
 
 local function cleanup(player: Player): boolean

@@ -12,6 +12,7 @@ export type PlayerData = {
 	tutorialCompleted: boolean,
 	starterZebraUnlocked: boolean,
 	onboardingDismissed: boolean,
+	leapTutorialDone: boolean, -- first-time slow-motion leap lesson learned or skipped (D-021)
 	discovered: { [string]: boolean },
 }
 
@@ -38,6 +39,7 @@ local function defaults(): PlayerData
 		tutorialCompleted = false,
 		starterZebraUnlocked = false,
 		onboardingDismissed = false,
+		leapTutorialDone = false,
 		discovered = {},
 	}
 end
@@ -50,6 +52,7 @@ local function reconcile(saved: any): PlayerData
 	data.tutorialCompleted = saved.tutorialCompleted == true
 	data.starterZebraUnlocked = saved.starterZebraUnlocked == true
 	data.onboardingDismissed = saved.onboardingDismissed == true
+	data.leapTutorialDone = saved.leapTutorialDone == true
 	if typeof(saved.discovered) == "table" then
 		for species, value in saved.discovered do
 			if typeof(species) == "string" and value == true then
@@ -68,6 +71,7 @@ local function publish(player: Player, data: PlayerData)
 	player:SetAttribute("TutorialCompleted", data.tutorialCompleted)
 	player:SetAttribute("StarterZebraUnlocked", data.starterZebraUnlocked)
 	player:SetAttribute("OnboardingDismissed", data.onboardingDismissed)
+	player:SetAttribute("LeapTutorialDone", data.leapTutorialDone)
 end
 
 local function save(player: Player)

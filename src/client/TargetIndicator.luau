@@ -54,7 +54,7 @@ function TargetIndicator.new()
 	self.highlight = highlight
 	self.billboard = billboard
 	self.label = label
-	self.buttonText = if isTouch then "TAP to leap" else "SPACE to leap"
+	self.buttonText = if isTouch then "LEAP" else "F to leap"
 	return self
 end
 

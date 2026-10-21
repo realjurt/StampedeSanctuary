@@ -32,13 +32,13 @@ RideController.__index = RideController
 local ACTION_LEFT = "RideSteerLeft"
 local ACTION_RIGHT = "RideSteerRight"
 local ACTION_JUMP = "RideJump"
+local ACTION_LEAP = "RideLeap"
 local CAMERA_STEP = "RideCamera"
 local JUMP_BUFFER = 0.15
 local BASE_FOV = 70
 local HINT_DURATION = 7
 local GAMEPAD_DEADZONE = 0.2
-local TAP_MAX_TIME = 0.25
-local TAP_MAX_MOVE = 14 -- pixels
+local TAP_MAX_MOVE = 14 -- pixels a touch must move before it counts as steering
 local TOUCH_SCREEN_SPAN = 1.1 -- a full-screen-width drag moves this many track widths
 local LAUNCH_ACCELERATION = 60 -- studs/s² when leaving the start line
 local END_PANEL_DELAY = 0.8
@@ -52,6 +52,11 @@ local LEAP_HEIGHT_PER_STUD = 0.12
 local LEAP_BOOST = 1.2 -- speed multiplier right after landing
 local LEAP_BOOST_TIME = 1.5
 local LAND_GRACE = 0.5 -- seconds after landing with no crashes
+local LEAP_RESUME_TIME = 0.25 -- real seconds to return to normal speed when a leap starts
+
+-- Simulation clock (D-019): one time scale for the whole local safari (rider, herds, temper, jumps).
+-- Steering keeps at least this fraction of real time so players can line up during slow motion.
+local STEER_MIN_SCALE = 0.6
 
 local hintShown = false
 
@@ -132,6 +137,9 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	self.seenSpecies = {} :: { [string]: boolean }
 	self.connections = {} :: { RBXScriptConnection }
 	self.hud = RideHud.new()
+	if not course.herds then
+		self.hud.leapButton.Visible = false
+	end
 	self.returnRemote = remotes:WaitForChild("ReturnToSanctuary") :: RemoteEvent
 	self.restartRemote = remotes:WaitForChild("RestartRun") :: RemoteEvent
 	self.switchRemote = remotes:WaitForChild("SwitchMount") :: RemoteEvent
@@ -147,9 +155,13 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	self.touchInput = nil :: InputObject?
 	self.touchStartX = 0
 	self.touchStartTargetX = 0
-	self.touchStartTime = 0
 	self.touchMoved = false
 	self.touchTargetX = nil :: number?
+
+	-- Simulation clock
+	self.timeScale = 1
+	self.timeScaleTarget = 1
+	self.timeScaleRate = 0
 
 	-- Mount + presentation state
 	self.leap = nil :: Leap?
@@ -243,6 +255,7 @@ function RideController.reset(self: RideController)
 	self.leapHeight = 0
 	self.boostTime = 0
 	self.graceTime = 0
+	self:setTimeScale(1, 0)
 	self.state = "countdown"
 	self.timer = CourseConfig.countdownTime
 	self.touchTargetX = nil
@@ -253,8 +266,31 @@ function RideController.reset(self: RideController)
 	self.restartRemote:FireServer()
 end
 
--- One button: leap to the targeted herd animal if there is one, otherwise a normal hop (D-008).
+-- Changes the local simulation speed. rampSeconds is real time; 0 applies immediately.
+function RideController.setTimeScale(self: RideController, target: number, rampSeconds: number)
+	self.timeScaleTarget = target
+	if rampSeconds <= 0 then
+		self.timeScale = target
+		self.timeScaleRate = 0
+	else
+		self.timeScaleRate = math.abs(target - self.timeScale) / rampSeconds
+	end
+end
+
+-- Jump is only ever a hop; leaping has its own control (D-020), so jumping can't switch animals.
 function RideController.jump(self: RideController)
+	if self.state ~= "running" then
+		return
+	end
+	if self.jumpTime == nil then
+		self.jumpTime = 0
+	else
+		self.jumpBufferedAt = os.clock()
+	end
+end
+
+-- Leaps onto the highlighted herd animal; does nothing without a valid target.
+function RideController.leapToTarget(self: RideController)
 	if self.state ~= "running" then
 		return
 	end
@@ -262,12 +298,6 @@ function RideController.jump(self: RideController)
 	local target = herds and herds.target
 	if target then
 		self:startLeap(target)
-		return
-	end
-	if self.jumpTime == nil then
-		self.jumpTime = 0
-	else
-		self.jumpBufferedAt = os.clock()
 	end
 end
 
@@ -297,6 +327,7 @@ function RideController.startLeap(self: RideController, wild: any)
 	self.jumpTime = nil
 	self.jumpBufferedAt = nil
 	self.state = "leaping"
+	self:setTimeScale(1, LEAP_RESUME_TIME)
 	self.switchRemote:FireServer(wild.id)
 end
 
@@ -368,6 +399,8 @@ function RideController.bindInput(self: RideController)
 			self.rightHeld = pressed
 		elseif actionName == ACTION_JUMP and pressed then
 			self:jump()
+		elseif actionName == ACTION_LEAP and pressed then
+			self:leapToTarget()
 		end
 		return Enum.ContextActionResult.Sink
 	end
@@ -377,6 +410,12 @@ function RideController.bindInput(self: RideController)
 	end
 	table.insert(self.connections, self.hud.leaveButton.Activated:Connect(leave))
 	table.insert(self.connections, self.hud.returnButton.Activated:Connect(leave))
+	table.insert(self.connections, self.hud.jumpButton.Activated:Connect(function()
+		self:jump()
+	end))
+	table.insert(self.connections, self.hud.leapButton.Activated:Connect(function()
+		self:leapToTarget()
+	end))
 	table.insert(self.connections, self.hud.againButton.Activated:Connect(function()
 		if self.state == "ended" then
 			self:reset()
@@ -392,6 +431,7 @@ function RideController.bindInput(self: RideController)
 	ContextActionService:BindActionAtPriority(ACTION_LEFT, handler, false, priority, Enum.KeyCode.A, Enum.KeyCode.Left, Enum.KeyCode.DPadLeft)
 	ContextActionService:BindActionAtPriority(ACTION_RIGHT, handler, false, priority, Enum.KeyCode.D, Enum.KeyCode.Right, Enum.KeyCode.DPadRight)
 	ContextActionService:BindActionAtPriority(ACTION_JUMP, handler, false, priority, Enum.KeyCode.Space, Enum.KeyCode.W, Enum.KeyCode.Up, Enum.KeyCode.ButtonA)
+	ContextActionService:BindActionAtPriority(ACTION_LEAP, handler, false, priority, Enum.KeyCode.F, Enum.KeyCode.ButtonX)
 
 	table.insert(self.connections, UserInputService.InputChanged:Connect(function(input)
 		if input.KeyCode == Enum.KeyCode.Thumbstick1 then
@@ -400,7 +440,8 @@ function RideController.bindInput(self: RideController)
 		end
 	end))
 
-	-- Touch: drag anywhere to steer (animal follows the thumb's sideways offset); quick tap = jump/leap.
+	-- Touch: drag anywhere to steer (animal follows the thumb's sideways offset). Jumping and leaping
+	-- use the on-screen JUMP / LEAP buttons only; touches on buttons are gameProcessed and ignored here.
 	table.insert(self.connections, UserInputService.TouchStarted:Connect(function(input, gameProcessed)
 		if gameProcessed or self.touchInput then
 			return
@@ -408,7 +449,6 @@ function RideController.bindInput(self: RideController)
 		self.touchInput = input
 		self.touchStartX = input.Position.X
 		self.touchStartTargetX = self.x
-		self.touchStartTime = os.clock()
 		self.touchMoved = false
 	end))
 	table.insert(self.connections, UserInputService.TouchMoved:Connect(function(input)
@@ -428,9 +468,6 @@ function RideController.bindInput(self: RideController)
 		if input ~= self.touchInput then
 			return
 		end
-		if not self.touchMoved and os.clock() - self.touchStartTime <= TAP_MAX_TIME then
-			self:jump()
-		end
 		self.touchInput = nil
 		self.touchTargetX = nil
 	end))
@@ -438,6 +475,7 @@ end
 
 function RideController.endRun(self: RideController, text: string, shake: number)
 	self.state = "ended"
+	self:setTimeScale(1, 0.15)
 	self.shake = shake
 	self.hud:showMessage(text)
 	task.delay(END_PANEL_DELAY, function()
@@ -566,7 +604,11 @@ function RideController.updateRunning(self: RideController, dt: number)
 	end
 end
 
-function RideController.step(self: RideController, dt: number)
+-- realDt is wall-clock frame time; everything in the safari simulation uses the scaled dt.
+function RideController.step(self: RideController, realDt: number)
+	self.timeScale = moveToward(self.timeScale, self.timeScaleTarget, self.timeScaleRate * realDt)
+	local dt = realDt * self.timeScale
+
 	if self.state == "countdown" then
 		self.timer -= dt
 		if self.timer <= 0 then
@@ -585,14 +627,20 @@ function RideController.step(self: RideController, dt: number)
 	end
 
 	if self.state ~= "leaping" then
-		self:updateSteering(dt)
+		self:updateSteering(realDt * math.max(self.timeScale, STEER_MIN_SCALE))
 		self:applyPose()
+	end
+
+	local herds = self.herds
+	if herds then
+		herds:step(dt)
 	end
 
 	if self.temperEnabled then
 		self.hud:setTemper(self.temper, self.stats.temperWarningAt)
 	end
 	self.hud:setProgress(self.distance / self.course.length)
+	self.hud:setLeapReady(self.state == "running" and herds ~= nil and herds.target ~= nil)
 	if self.onStep then
 		self.onStep(dt)
 	end
@@ -679,6 +727,7 @@ function RideController.destroy(self: RideController)
 	ContextActionService:UnbindAction(ACTION_LEFT)
 	ContextActionService:UnbindAction(ACTION_RIGHT)
 	ContextActionService:UnbindAction(ACTION_JUMP)
+	ContextActionService:UnbindAction(ACTION_LEAP)
 	RunService:UnbindFromRenderStep(CAMERA_STEP)
 
 	local leap = self.leap

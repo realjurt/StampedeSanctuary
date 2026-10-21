@@ -1,6 +1,8 @@
 --!strict
 -- Placeholder riding HUD: temper meter, progress, messages, leave button, end-of-run panel.
 
+local UserInputService = game:GetService("UserInputService")
+
 local UiKit = require(script.Parent.UiKit)
 
 local RideHud = {}
@@ -15,6 +17,8 @@ export type RideHud = typeof(setmetatable(
 		message: TextLabel,
 		hint: TextLabel,
 		leaveButton: TextButton,
+		jumpButton: TextButton,
+		leapButton: TextButton,
 		endPanel: Frame,
 		againButton: TextButton,
 		returnButton: TextButton,
@@ -74,6 +78,21 @@ function RideHud.new(): RideHud
 	leaveButton.Size = UDim2.fromOffset(150, 40)
 	leaveButton.BackgroundTransparency = 0.3
 
+	-- Touch-only action buttons (D-020): JUMP always available, LEAP lit only when an animal is targeted.
+	local isTouch = UserInputService.TouchEnabled
+	local jumpButton = UiKit.button(gui, "Jump", "JUMP", Color3.fromRGB(80, 140, 210), 26)
+	jumpButton.AnchorPoint = Vector2.new(1, 1)
+	jumpButton.Position = UDim2.new(1, -24, 1, -24)
+	jumpButton.Size = UDim2.fromOffset(110, 110)
+	UiKit.corner(jumpButton, UDim.new(1, 0))
+	jumpButton.Visible = isTouch
+	local leapButton = UiKit.button(gui, "Leap", "LEAP", Color3.fromRGB(255, 190, 40), 26)
+	leapButton.AnchorPoint = Vector2.new(1, 1)
+	leapButton.Position = UDim2.new(1, -150, 1, -60)
+	leapButton.Size = UDim2.fromOffset(100, 100)
+	UiKit.corner(leapButton, UDim.new(1, 0))
+	leapButton.Visible = isTouch
+
 	local endPanel = Instance.new("Frame")
 	endPanel.Name = "EndPanel"
 	endPanel.AnchorPoint = Vector2.new(0.5, 0)
@@ -101,6 +120,8 @@ function RideHud.new(): RideHud
 		message = message,
 		hint = hint,
 		leaveButton = leaveButton,
+		jumpButton = jumpButton,
+		leapButton = leapButton,
 		endPanel = endPanel,
 		againButton = againButton,
 		returnButton = returnButton,
@@ -152,14 +173,20 @@ end
 
 function RideHud.showHint(self: RideHud, isTouch: boolean, duration: number)
 	self.hint.Text = if isTouch
-		then "Drag left/right to steer  ·  Tap to jump"
-		else "Hold A / D or ← / → to steer  ·  Space to jump"
+		then "Drag to steer  ·  JUMP to hop  ·  LEAP onto glowing animals"
+		else "A / D to steer  ·  Space to jump  ·  F to leap onto glowing animals"
 	self.hint.Visible = true
 	task.delay(duration, function()
 		if self.hint.Parent then
 			self.hint.Visible = false
 		end
 	end)
+end
+
+function RideHud.setLeapReady(self: RideHud, ready: boolean)
+	self.leapButton.BackgroundTransparency = if ready then 0 else 0.65
+	self.leapButton.TextTransparency = if ready then 0 else 0.5
+	self.leapButton.Active = ready
 end
 
 function RideHud.setEndPanelVisible(self: RideHud, visible: boolean)

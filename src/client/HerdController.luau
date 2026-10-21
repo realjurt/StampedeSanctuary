@@ -1,11 +1,11 @@
 --!strict
 -- Wild herds for one run: spawns AnimalAgents from the seeded HerdSchedule as the rider approaches,
 -- moves them with a simple herd brain, despawns them behind the rider, and picks the best leap
--- target (shown by TargetIndicator; Milestone 5 will make it leapable). Herd animals never crash
--- the rider and only sidestep when actually overlapping, so they stay catchable (D-017).
+-- target (shown by TargetIndicator). Herd animals never crash the rider and only sidestep when
+-- actually overlapping, so they stay catchable (D-017). Stepped by RideController with the ride's
+-- simulation clock, so slow motion affects rider and herds identically (D-019).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local HerdSchedule = require(ReplicatedStorage.Shared.Herds.HerdSchedule)
 local AnimalAgent = require(script.Parent.AnimalAgent)
@@ -57,9 +57,7 @@ function HerdController.new(ride: any, seed: number)
 	self.target = nil :: Wild?
 	self.indicator = TargetIndicator.new()
 	self.lastRiderDistance = ride.distance
-	self.connection = RunService.PreSimulation:Connect(function(dt)
-		self:step(dt)
-	end)
+	self.time = 0 -- simulation time; drives wander so it slows with the ride
 	return self
 end
 
@@ -130,7 +128,7 @@ function HerdController.think(self: HerdController, wild: Wild, dt: number)
 	agent.speed = moveToward(agent.speed, desiredSpeed, 30 * dt)
 	agent.distance += agent.speed * dt
 
-	local target = wild.homeX + math.sin(os.clock() * stats.wanderFrequency * 2 * math.pi + wild.wanderPhase) * stats.wanderAmplitude
+	local target = wild.homeX + math.sin(self.time * stats.wanderFrequency * 2 * math.pi + wild.wanderPhase) * stats.wanderAmplitude
 
 	-- Gentle sidestep only while actually overlapping the rider (never when merely ahead).
 	local riderHalfLength = ride.stats.hitboxHalfLength
@@ -208,8 +206,10 @@ function HerdController.updateTarget(self: HerdController)
 	end
 end
 
+-- dt is simulation time (already scaled by the ride's time scale).
 function HerdController.step(self: HerdController, dt: number)
 	local ride = self.ride
+	self.time += dt
 	if ride.distance < self.lastRiderDistance - RESET_THRESHOLD then
 		self:clear()
 		self.nextHerd = 1
@@ -244,7 +244,6 @@ function HerdController.step(self: HerdController, dt: number)
 end
 
 function HerdController.destroy(self: HerdController)
-	self.connection:Disconnect()
 	self:clear()
 	self.indicator:destroy()
 end

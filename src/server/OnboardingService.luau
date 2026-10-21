@@ -53,7 +53,29 @@ function OnboardingService.completeTutorial(player: Player)
 	end)
 end
 
+-- First-time leap lesson (D-021): "learned" requires a server-validated switch in the current run;
+-- "skipped" just needs an active run on a course with herds. Saved separately from onboarding.
+function OnboardingService.completeLeapTutorial(player: Player, reason: any)
+	if reason ~= "learned" and reason ~= "skipped" then
+		return
+	end
+	local data = PlayerDataService.get(player)
+	if not data or data.leapTutorialDone then
+		return
+	end
+	local courseId, _, switches = SafariService.getRun(player)
+	local course = courseId and CourseConfig.courses[courseId]
+	if not course or not course.herds or (reason == "learned" and (switches or 0) < 1) then
+		warn(`OnboardingService: rejected leap tutorial ({reason}) from {player.Name}`)
+		return
+	end
+	PlayerDataService.update(player, function(d)
+		d.leapTutorialDone = true
+	end)
+end
+
 function OnboardingService.start(skipPrompt: ProximityPrompt)
+	Net.on("CompleteLeapTutorial", 1, OnboardingService.completeLeapTutorial)
 	Net.on("SkipTutorial", 1, function(player)
 		OnboardingService.skipTutorial(player)
 	end)

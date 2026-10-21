@@ -71,7 +71,7 @@ local CourseConfig = {
 				sections = {
 					{ id = "Steer", start = 0, prompt = "Steer with A / D  (or ← / →)", touchPrompt = "Drag left and right to steer" },
 					{ id = "Dodge", start = 150, prompt = "Dodge the rocks!" },
-					{ id = "Jump", start = 310, prompt = "Press Space to jump the logs!", touchPrompt = "Tap to jump the logs!" },
+					{ id = "Jump", start = 310, prompt = "Press Space to jump the logs!", touchPrompt = "Tap JUMP to clear the logs!" },
 					{ id = "Switch", start = 440, prompt = "Leap onto another animal!", enabled = false },
 					{ id = "Finish", start = 440, prompt = "Almost friends — reach the finish!" },
 				},
