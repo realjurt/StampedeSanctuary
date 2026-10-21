@@ -61,7 +61,7 @@ local AnimalConfig: { [string]: AnimalStats } = {
 		herdSpeedFactor = 0.88,
 		herdMinSpeed = 16,
 		herdSteerSpeed = 14,
-		wanderAmplitude = 4,
+		wanderAmplitude = 3,
 		wanderFrequency = 0.35,
 	},
 	Elephant = {

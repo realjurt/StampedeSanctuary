@@ -4,6 +4,7 @@
 
 local Players = game:GetService("Players")
 
+local HerdController = require(script.Parent.HerdController)
 local OnboardingController = require(script.Parent.OnboardingController)
 local RideController = require(script.Parent.RideController)
 local SanctuaryView = require(script.Parent.SanctuaryView)
@@ -12,8 +13,13 @@ local TutorialDirector = require(script.Parent.TutorialDirector)
 local player = Players.LocalPlayer
 local current: RideController.RideController? = nil
 local tutorial: TutorialDirector.TutorialDirector? = nil
+local herds: HerdController.HerdController? = nil
 
 local function stopRide()
+	if herds then
+		herds:destroy()
+		herds = nil
+	end
 	if tutorial then
 		tutorial:destroy()
 		tutorial = nil
@@ -40,6 +46,10 @@ local function syncRide()
 	current = ride
 	if ride.course.tutorial then
 		tutorial = TutorialDirector.new(ride)
+	end
+	local seed = player:GetAttribute("SafariSeed")
+	if ride.course.herds and typeof(seed) == "number" then
+		herds = HerdController.new(ride, seed)
 	end
 end
 

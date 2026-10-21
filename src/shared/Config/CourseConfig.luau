@@ -37,6 +37,7 @@ export type Course = {
 	speedMultiplier: number?,
 	temperEnabled: boolean?,
 	tutorial: TutorialSpec?,
+	herds: boolean?, -- wild herds run alongside (generated from the run seed)
 }
 
 local CourseConfig = {
@@ -95,6 +96,7 @@ local CourseConfig = {
 			origin = Vector3.new(0, 0, 0),
 			length = 950,
 			trackWidth = 44,
+			herds = true,
 			obstacles = {
 				-- Warm-up: single rocks
 				{ distance = 120, x = 0, kind = "Rock" },
