@@ -8,7 +8,7 @@ return {
 	size = 140,
 	spawnOffset = Vector3.new(0, 0, 50),
 	entranceOffset = Vector3.new(0, 0, 40),
-	gateOffset = Vector3.new(0, 0, -50),
+	gateOffset = Vector3.new(0, 0, -10), -- 60 studs from spawn: ~4 s straight walk, habitat alongside
 	habitatOffset = Vector3.new(32, 0, 0),
 	habitatSize = 30,
 	pathWidth = 8,

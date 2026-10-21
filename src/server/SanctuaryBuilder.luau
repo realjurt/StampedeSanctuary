@@ -88,7 +88,8 @@ function SanctuaryBuilder.build(): Sanctuary
 	local ground = makePart(model, "Ground", Vector3.new(SanctuaryConfig.size, 1, SanctuaryConfig.size), at(Vector3.zero, -0.5), COLORS.grass)
 	ground.CanTouch = false
 	local pathLength = SanctuaryConfig.spawnOffset.Z - SanctuaryConfig.gateOffset.Z + 10
-	decor(makePart(model, "Path", Vector3.new(SanctuaryConfig.pathWidth, 0.1, pathLength), at(Vector3.zero, 0.02), COLORS.path))
+	local pathCenter = Vector3.new(0, 0, (SanctuaryConfig.spawnOffset.Z + SanctuaryConfig.gateOffset.Z) / 2)
+	decor(makePart(model, "Path", Vector3.new(SanctuaryConfig.pathWidth, 0.1, pathLength), at(pathCenter, 0.02), COLORS.path))
 
 	-- Spawn
 	local spawnLocation = Instance.new("SpawnLocation")
@@ -105,10 +106,11 @@ function SanctuaryBuilder.build(): Sanctuary
 	-- Entrance arch
 	local entrance = SanctuaryConfig.entranceOffset
 	for _, side in { -1, 1 } do
-		makePart(model, "EntrancePost", Vector3.new(1.6, 12, 1.6), at(entrance + Vector3.new(side * 8, 0, 0), 6), COLORS.fence)
+		makePart(model, "EntrancePost", Vector3.new(1.6, 9, 1.6), at(entrance + Vector3.new(side * 8, 0, 0), 4.5), COLORS.fence)
 	end
-	-- Sits slightly in front of the posts so they don't cover the text.
-	local banner = makePart(model, "EntranceBanner", Vector3.new(18, 3, 1), at(entrance + Vector3.new(0, 0, 1.2), 11), COLORS.sign)
+	-- Low enough that the Safari Gate sign stays visible over it from the spawn; sits slightly in
+	-- front of the posts so they don't cover the text.
+	local banner = makePart(model, "EntranceBanner", Vector3.new(18, 3, 1), at(entrance + Vector3.new(0, 0, 1.2), 7.5), COLORS.sign)
 	sign(banner, "Sign", "STAMPEDE SANCTUARY", Color3.fromRGB(90, 60, 30))
 
 	-- Empty Zebra habitat
