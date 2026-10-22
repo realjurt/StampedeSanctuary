@@ -19,10 +19,8 @@ Turn response roughly halved (elephant first visible turn 0.35 → 0.18 s, 90° 
 ## Not yet verified
 How the camera feels to you · safari mode not re-run (its code is separate and untouched) · mobile · gamepad · two players.
 
-## Waiting on you — camera check
-1. Play → ride any animal in the **RIDING TEST FIELD** at full gallop, straight and through turns.
-2. Is the camera steady now? Is the landing thud (camera shake on landing, strongest on the elephant) too much?
-Then R1 approval → R2. Don't start R2 until approved.
+## Waiting on you
+Handling approved and camera confirmed steady (2026-10-22). Next: your go-ahead for R2 (savannah + roaming animals) — don't start it until you say so.
 
 ## Next recommended task
 Further tuning from feedback → R2 (savannah + roaming animals) after approval.
