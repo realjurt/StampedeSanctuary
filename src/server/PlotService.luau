@@ -17,7 +17,7 @@ local owned: { [number]: Plot } = {} -- UserId → plot
 local function showOwner(plot: Plot, displayName: string?)
 	if displayName then
 		plot.title.Text = `{displayName}'s Sanctuary`
-		plot.income.Text = "$0/s" -- pen income arrives in P3
+		plot.income.Text = "$0/s" -- PenService keeps this current
 	else
 		plot.title.Text = "Empty Plot"
 		plot.income.Text = ""
@@ -52,9 +52,8 @@ function PlotService.release(userId: number)
 	showOwner(plot, nil)
 end
 
-function PlotService.getPlot(player: Player): Model?
-	local plot = owned[player.UserId]
-	return if plot then plot.model else nil
+function PlotService.getPlot(player: Player): Plot?
+	return owned[player.UserId]
 end
 
 local function onPlayerAdded(player: Player)

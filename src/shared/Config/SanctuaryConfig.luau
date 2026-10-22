@@ -25,5 +25,5 @@ return {
 		Vector3.new(94, 0, 45),
 	},
 	plotSize = Vector2.new(45, 48), -- width (along the hub edge) × depth (away from the hub)
-	penSize = 20,
+	penSize = 28, -- fits 8 animals (4 × 2) up to elephant size
 }

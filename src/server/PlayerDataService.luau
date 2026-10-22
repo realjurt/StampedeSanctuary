@@ -33,6 +33,7 @@ type Profile = {
 	saving: boolean,
 	dirty: boolean, -- changed while a save was in flight: save again
 	unsaved: boolean, -- changed with deferSave: the autosave loop writes it
+	lastSaveOk: boolean,
 }
 
 local PlayerDataService = {}
@@ -134,11 +135,25 @@ local function save(player: Player)
 			snapshot.animals[i] = table.clone(record)
 		end
 		local ok, err = pcall(function()
+			-- Studio-only fault injection for tests, via attributes on this script: TestSaveDelay
+			-- (seconds a write takes) and TestFailSaves (number of writes that fail).
+			local delay = if RunService:IsStudio() then script:GetAttribute("TestSaveDelay") else nil
+			if typeof(delay) == "number" and delay > 0 then
+				task.wait(delay)
+			end
+			local failures = if RunService:IsStudio() then script:GetAttribute("TestFailSaves") else nil
+			if typeof(failures) == "number" and failures > 0 then
+				script:SetAttribute("TestFailSaves", failures - 1)
+				error("simulated DataStore failure")
+			end
 			(store :: DataStore):UpdateAsync(keyFor(player), function()
 				return snapshot
 			end)
 		end)
+		profile.lastSaveOk = ok
 		if not ok then
+			-- The in-memory data stays authoritative; the autosave loop retries it.
+			profile.unsaved = true
 			warn(`PlayerDataService: save failed for {player.Name}: {err}`)
 		end
 	until not profile.dirty
@@ -165,7 +180,7 @@ local function load(player: Player)
 	if not player.Parent then
 		return
 	end
-	profiles[player] = { data = data, canSave = canSave, saving = false, dirty = false, unsaved = false }
+	profiles[player] = { data = data, canSave = canSave, saving = false, dirty = false, unsaved = false, lastSaveOk = true }
 	publish(player, data)
 	player:SetAttribute("DataSaveDisabled", not canSave)
 	player:SetAttribute("DataLoaded", true)
@@ -178,6 +193,27 @@ function PlayerDataService.get(player: Player): PlayerData?
 	end
 	local profile = profiles[player]
 	return if profile then profile.data else nil
+end
+
+-- Like `get`, but never yields: nil until the player's data has loaded.
+function PlayerDataService.peek(player: Player): PlayerData?
+	local profile = profiles[player]
+	return if profile then profile.data else nil
+end
+
+-- Saves now and yields until every pending write for this player has finished. Returns whether the
+-- last write succeeded (false also when saving is unavailable). A failed write stays marked unsaved
+-- so the autosave loop retries it.
+function PlayerDataService.saveNow(player: Player): boolean
+	local profile = profiles[player]
+	if not profile or not profile.canSave or not store then
+		return false
+	end
+	save(player)
+	while profile.saving do
+		task.wait()
+	end
+	return profile.lastSaveOk
 end
 
 -- Applies a change, republishes attributes, and saves in the background. Pass `deferSave` for
@@ -235,7 +271,20 @@ function PlayerDataService.start()
 	end
 
 	Players.PlayerRemoving:Connect(function(player)
-		save(player)
+		-- Last chance to write this player's data: wait for any in-flight save and retry failures.
+		local profile = profiles[player]
+		if profile then
+			for attempt = 1, LOAD_ATTEMPTS do
+				save(player)
+				while profile.saving do
+					task.wait()
+				end
+				if profile.lastSaveOk then
+					break
+				end
+				task.wait(attempt)
+			end
+		end
 		profiles[player] = nil
 	end)
 
@@ -252,10 +301,13 @@ function PlayerDataService.start()
 
 	game:BindToClose(function()
 		local pending = 0
-		for player in profiles do
+		for player, profile in profiles do
 			pending += 1
 			task.spawn(function()
 				save(player)
+				while profile.saving do -- a save already in flight (e.g. a deposit) must finish too
+					task.wait()
+				end
 				pending -= 1
 			end)
 		end

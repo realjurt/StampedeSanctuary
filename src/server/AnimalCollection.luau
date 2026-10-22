@@ -2,12 +2,13 @@
 -- Persistent animal records (data v3, D-024). Pure functions on a player's data table, so they can
 -- be tested without a live profile. Every owned animal is one record with a unique id:
 --   "carried" — tamed on safari, held until deposited (P2)
---   "pen"     — deposited in the player's pen; only these will earn income (P3)
+--   "pen"     — deposited in the player's pen; only these earn income (P3)
 -- The collection inventory (P6) and selling read these same records.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AnimalConfig = require(ReplicatedStorage.Shared.Config.AnimalConfig)
+local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
 
 export type AnimalState = "carried" | "pen"
 
@@ -39,6 +40,60 @@ function AnimalCollection.countCarried(owner: Owner): number
 		end
 	end
 	return count
+end
+
+function AnimalCollection.countInPen(owner: Owner): number
+	local count = 0
+	for _, record in owner.animals do
+		if record.state == "pen" then
+			count += 1
+		end
+	end
+	return count
+end
+
+function AnimalCollection.incomeOf(species: string): number
+	return EconomyConfig.incomePerSecond[species] or 0
+end
+
+-- Coins per second from pen animals only (D-024: carried animals never earn).
+function AnimalCollection.penIncome(owner: Owner): number
+	local total = 0
+	for _, record in owner.animals do
+		if record.state == "pen" then
+			total += AnimalCollection.incomeOf(record.species)
+		end
+	end
+	return total
+end
+
+-- Pen records in deposit order; a record's index is its slot in the pen.
+function AnimalCollection.penRecords(owner: Owner): { AnimalRecord }
+	local list = {}
+	for _, record in owner.animals do
+		if record.state == "pen" then
+			table.insert(list, record)
+		end
+	end
+	return list
+end
+
+-- Moves carried animals into the pen, oldest first, until it holds `capacity`. Each record only
+-- changes state in place, so a deposit can never create or duplicate a record. Returns the moved
+-- records (empty when nothing was carried or the pen is full). Doesn't yield.
+function AnimalCollection.depositCarried(owner: Owner, capacity: number): { AnimalRecord }
+	local space = capacity - AnimalCollection.countInPen(owner)
+	local moved = {}
+	for _, record in owner.animals do
+		if #moved >= space then
+			break
+		end
+		if record.state == "carried" then
+			record.state = "pen"
+			table.insert(moved, record)
+		end
+	end
+	return moved
 end
 
 -- Adds a carried animal and returns it. The caller has already validated the capture.

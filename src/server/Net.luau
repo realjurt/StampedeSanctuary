@@ -38,4 +38,12 @@ function Net.on(name: string, cooldown: number, handler: (Player, ...any) -> ())
 	return remote
 end
 
+-- Server → client only (no handler). `unreliable` for cosmetic, droppable messages.
+function Net.event(name: string, unreliable: boolean?): RemoteEvent | UnreliableRemoteEvent
+	local remote = Instance.new(if unreliable then "UnreliableRemoteEvent" else "RemoteEvent") :: any
+	remote.Name = name
+	remote.Parent = folder
+	return remote
+end
+
 return Net

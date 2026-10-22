@@ -30,6 +30,9 @@ export type Plot = {
 	model: Model,
 	title: TextLabel,
 	income: TextLabel,
+	penCFrame: CFrame, -- pen floor centre (ground level), facing the hub
+	depositPrompt: ProximityPrompt,
+	penAnimals: Folder, -- PenService's server-built animals, seen by everyone
 }
 
 export type Sanctuary = {
@@ -93,7 +96,7 @@ local function plotAt(frame: CFrame, localPosition: Vector3, y: number): CFrame
 	return at(frame * localPosition, y) * frame.Rotation
 end
 
--- Placeholder plot: ground, owner sign facing the hub, empty fenced pen (animals arrive in P3) and a
+-- Placeholder plot: ground, owner sign facing the hub, fenced pen with a deposit prompt and a
 -- pad where the training machine will stand (P4).
 local function buildPlot(parent: Instance, id: number, offset: Vector3): Plot
 	local model = Instance.new("Model")
@@ -132,10 +135,23 @@ local function buildPlot(parent: Instance, id: number, offset: Vector3): Plot
 	local title = line("Title", 0.06, 0.56, Color3.fromRGB(90, 60, 30))
 	local income = line("Income", 0.64, 0.3, Color3.fromRGB(40, 140, 50))
 
-	-- Empty pen
+	-- Pen: deposited animals stand here (P3). The prompt is shown only to the owner (client-side) and
+	-- every trigger is validated by DepositService.
 	local penCenter = frame * Vector3.new(7, 0, 6)
-	decor(makePart(model, "PenGround", Vector3.new(SanctuaryConfig.penSize, 0.2, SanctuaryConfig.penSize), at(penCenter, 0.05), COLORS.habitat))
+	local penGround = makePart(model, "PenGround", Vector3.new(SanctuaryConfig.penSize, 0.2, SanctuaryConfig.penSize), at(penCenter, 0.05), COLORS.habitat)
+	decor(penGround)
 	fence(model, penCenter, SanctuaryConfig.penSize)
+	local depositPrompt = Instance.new("ProximityPrompt")
+	depositPrompt.Name = "DepositPrompt"
+	depositPrompt.ActionText = "Deposit animals"
+	depositPrompt.ObjectText = "Your pen"
+	depositPrompt.HoldDuration = 0
+	depositPrompt.MaxActivationDistance = 18
+	depositPrompt.RequiresLineOfSight = false
+	depositPrompt.Parent = penGround
+	local penAnimals = Instance.new("Folder")
+	penAnimals.Name = "PenAnimals"
+	penAnimals.Parent = model
 
 	-- Training machine pad
 	local pad = makePart(model, "MachinePad", Vector3.new(0.4, 10, 10), plotAt(frame, Vector3.new(-14, 0, 6), 0.2) * CFrame.Angles(0, 0, math.rad(90)), COLORS.machinePad)
@@ -158,7 +174,15 @@ local function buildPlot(parent: Instance, id: number, offset: Vector3): Plot
 	padText.Parent = padLabel
 
 	model.Parent = parent
-	return { id = id, model = model, title = title, income = income }
+	return {
+		id = id,
+		model = model,
+		title = title,
+		income = income,
+		penCFrame = at(penCenter, 0.15) * frame.Rotation,
+		depositPrompt = depositPrompt,
+		penAnimals = penAnimals,
+	}
 end
 
 function SanctuaryBuilder.build(): Sanctuary
