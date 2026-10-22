@@ -91,17 +91,18 @@ FreeRideConfig.handling = {
 			sway = 0.02,
 		},
 	},
-	-- Long legs: builds speed slowly but reaches the highest top speed; wide turns; high, floaty jumps.
+	-- Long legs: smooth build to the highest top speed; wide, graceful turns; high, floaty jumps.
+	-- R1 playtest: steering felt delayed, so turns now start promptly (turnAcceleration) and stay wide.
 	Giraffe = {
 		hint = "Giraffe — long strides, wide turns, floaty jumps",
 		topSpeed = 52,
-		acceleration = 20,
-		braking = 50,
-		coastDeceleration = 14,
+		acceleration = 28,
+		braking = 60,
+		coastDeceleration = 16,
 		reverseSpeed = 7,
-		turnRateSlow = 150,
-		turnRateFast = 62,
-		turnAcceleration = 500,
+		turnRateSlow = 190,
+		turnRateFast = 95,
+		turnAcceleration = 1000,
 		airControl = 0.35,
 		hillSlowdown = 0.25,
 		jumpHeight = 10,
@@ -132,17 +133,19 @@ FreeRideConfig.handling = {
 			sway = 0.05,
 		},
 	},
-	-- Heavy: slow to get going and slow to stop, weighty steering, low thudding jumps, shoves crates.
+	-- Heavy: lowest top speed, long momentum, low thudding jumps, shoves crates.
+	-- R1 playtest: steering felt hard to control, so it now answers the stick promptly; weight comes from
+	-- momentum, body motion and a short carry-on after releasing a turn rather than turn lag.
 	Elephant = {
 		hint = "Elephant — heavy and strong: shove crates out of the way",
 		topSpeed = 36,
-		acceleration = 11,
-		braking = 30,
-		coastDeceleration = 9,
+		acceleration = 18,
+		braking = 42,
+		coastDeceleration = 12,
 		reverseSpeed = 6,
-		turnRateSlow = 110,
-		turnRateFast = 60,
-		turnAcceleration = 160,
+		turnRateSlow = 150,
+		turnRateFast = 85,
+		turnAcceleration = 650,
 		airControl = 0.2,
 		hillSlowdown = 0.1,
 		jumpHeight = 4.5,
