@@ -2,6 +2,13 @@
 
 Back to [[00 - Project Dashboard]] · Newest first. One short entry per significant session.
 
+## 2026-10-22 — R1 feedback → steering response tuning
+- R1 playtest: giraffe + elephant steering felt delayed; zebra fine — [[13 - Playtesting]].
+- Cause: `turnAcceleration` (how fast a turn builds and dies away) was 500 giraffe / 160 elephant vs 1400 zebra, plus low turn rates and acceleration. Camera checked: starts turning the same frame as the animal and settles ~0.3 s behind it, ~70 ms position smoothing — not a source of delay; unchanged.
+- Commit `d12f148` (config only, `FreeRideConfig`): giraffe accel 20→28, braking 50→60, coast 14→16, turn 150/62→190/95, turnAccel 500→1000; elephant accel 11→18, braking 30→42, coast 9→12, turn 110/60→150/85, turnAccel 160→650. Zebra unchanged.
+- Verified: math replay of the steering code — first visible turn giraffe 0.20→0.15 s, elephant 0.35→0.18 s; 90° at speed 1.03→0.77 s / 1.35→0.88 s; elephant drift after releasing a turn 19°→10°; zebra still quickest in every measure. In Studio with real keys: mount/dismount (E) all three; elephant 10° in 0.1 s, 90° in ~0.7 s; giraffe 90° in ~0.8 s, reverse (S) at 7 studs/s with camera swinging behind; zebra unchanged. Only the known asset warning in console.
+- Not re-tested in game (code untouched, config-only change): crate pushing, safari mode, jumping feel. Not verified: feel, mobile, gamepad.
+
 ## 2026-10-21 — R0 approved → R1: species handling
 - R0 playtest: approved (directional riding a much better foundation; exploring/jumping work; camera stable; zebra looked stiff) — [[13 - Playtesting]].
 - Commit `bebccfb` ([[11 - Decisions#D-028 R1 species handling & pushable obstacles|D-028]]): `FreeRideMotion` (per-mount motion + placeholder body feedback), practice zebra/giraffe/elephant, `PushableService` + crates/bushes in the test field; `FreeRideConfig` per-species handling.

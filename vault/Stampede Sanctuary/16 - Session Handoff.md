@@ -2,33 +2,32 @@
 
 Back to [[00 - Project Dashboard]] · Overwritten at the end of each significant session. History lives in [[12 - Development Log]].
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## Worked on
-R0 approved → **R1 Free Riding Feel**: zebra, giraffe and elephant now ride differently, with placeholder body feedback ([[11 - Decisions#D-028 R1 species handling & pushable obstacles|D-028]]). Two-client multiplayer test still outstanding ([[13 - Playtesting#Outstanding multiplayer test]]).
+R1 playtest feedback: giraffe and elephant steering felt delayed ([[13 - Playtesting]]). Tuned them to respond promptly while keeping their personalities.
 
 ## Changed
-Commit `bebccfb`: new `FreeRideMotion` (client), `PushableService` (server); `FreeRide` now runs three practice animals; `FreeRideConfig` per-species handling; crates/bushes in the test field; `AnimalAgent.poseFree` simplified. Straight safari, economy and saving untouched.
-Your Studio save: unchanged — saves were blocked during tests.
+Commit `d12f148`, config only (`src/shared/Config/FreeRideConfig.luau`): giraffe and elephant turns build up much faster, higher turn rates and acceleration. Zebra unchanged. Camera checked, not a cause — unchanged.
+Your Studio save: unchanged.
 
 ## Tested / verified (by Claude, in Studio)
-Species numbers, terrain, mount/dismount, elephant pushing (server-side), push validation, safari mode — details in [[12 - Development Log]].
+Turn response roughly halved (elephant first visible turn 0.35 → 0.18 s, 90° turn 1.35 → ~0.8 s); mount/dismount, reversing, camera follow; zebra identical. Details in [[12 - Development Log]].
 
 ## Not yet verified
-How it feels · mobile touch · gamepad · two players seeing pushes.
+How it feels · crate pushing and safari mode not re-run (config-only change) · mobile · gamepad · two players.
 
-## Waiting on you — R1 playtest
-1. Play → walk north to the **RIDING TEST FIELD** sign. Three animals stand in a row: **giraffe** (left), **zebra** (middle), **elephant** (right).
-2. Ride each (**E**). Compare: zebra quick and twitchy; giraffe slow to build, wide turns, big floaty jump; elephant slow and heavy, keeps turning a moment after you let go.
-3. On the elephant, ride straight ahead into the **row of crates/bushes** (also a crate cluster by the big hill) — they get shoved aside. Zebra and giraffe are blocked by them (jump them).
-4. Watch the bodies: lean in turns, walk → gallop change, nose up when speeding up, squash on landing.
-5. Tell me per animal: too fast/slow, too twitchy/sluggish, jump feel, anything still stiff.
+## Waiting on you — R1 re-playtest
+1. Play → walk north to the **RIDING TEST FIELD**: giraffe (left), zebra (middle), elephant (right).
+2. Ride the **giraffe** and **elephant** (**E**). Check: does each react promptly when you press a direction? Sharp turns, reversing (S), camera.
+3. Check they still feel different: giraffe smooth and graceful with wide arcs and floaty jumps; elephant heavy (slow top speed, long momentum, short carry-on after a turn) and shoves crates.
+4. Tell me per animal: still delayed? now too twitchy? anything else.
 Don't start R2 until approved.
 
 ## Next recommended task
-Tune from feedback → R2 (savannah + roaming animals).
+Further tuning from feedback → R2 (savannah + roaming animals) after approval.
 
 ## Testing tips
-- Values to tune: `src/shared/Config/FreeRideConfig.luau` (one block per species).
+- Values to tune: `src/shared/Config/FreeRideConfig.luau` — `turnAcceleration` = how fast turns start/stop; `turnRateSlow/Fast` = turn tightness; `acceleration` = pickup.
 - Session start: Claude runs `rojo serve`; you click **Connect** in Studio's Rojo plugin.
 - Known unrelated console warning: `rbxassetid://203785492` asset-type mismatch.

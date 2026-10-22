@@ -21,6 +21,12 @@ Changes to try:
 
 ## Sessions
 
+### 2026-10-22 — R1: species handling (commit `bebccfb`)
+Tester: realjurt · Device: desktop (Studio) · **Verdict: not approved — handling adjustment first**
+What needs work: giraffe and elephant feel noticeably delayed when steering, which makes them frustrating to control. Zebra is close to what's wanted.
+Direction (confirmed): every animal must react noticeably and promptly to a direction press. Keep species personality through acceleration, turning radius, top speed, jump height, body movement and momentum — **not** through input lag. Giraffe = smooth and graceful, not delayed; elephant = heavy and powerful, not hard to control. Responsive, satisfying controls over realism.
+Changes made: tuning pass `d12f148` (see [[12 - Development Log]]). Awaiting re-test.
+
 ### 2026-10-21 — R0: directional riding prototype (commit `0216979`)
 Tester: realjurt · Device: desktop (Studio) · **Verdict: approved → R1**
 What felt good: directional riding is a much better foundation than the straight safari; free exploration and jumping work; camera reasonably stable.
