@@ -1,10 +1,13 @@
 --!strict
--- Coins and stamina pills (top-right), shown in the sanctuary and on safari. Read-only: values come
--- from the server-published Coins / Stamina attributes (P1, approved 2026-10-22).
+-- Coins, stamina and carried-animal pills (top-right), shown in the sanctuary and on safari.
+-- Read-only: values come from the server-published Coins / Stamina / CarriedCount attributes
+-- (P1, P2 — D-023, D-024).
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local TamingConfig = require(ReplicatedStorage.Shared.Config.TamingConfig)
 local UiKit = require(script.Parent.UiKit)
 
 local CurrencyHud = {}
@@ -68,7 +71,7 @@ function CurrencyHud.start()
 	stack.BackgroundTransparency = 1
 	stack.AnchorPoint = Vector2.new(1, 0)
 	stack.Position = UDim2.new(1, -14, 0, 64) -- below Roblox's top bar
-	stack.Size = UDim2.fromOffset(170, 98)
+	stack.Size = UDim2.fromOffset(170, 152)
 	stack.Parent = gui
 	UiKit.autoScale(stack)
 	local layout = Instance.new("UIListLayout")
@@ -79,11 +82,15 @@ function CurrencyHud.start()
 	local labels = {
 		Coins = pill(stack, "Coins", "💰", "yellow", 1),
 		Stamina = pill(stack, "Stamina", "⚡", "cyan", 2),
+		CarriedCount = pill(stack, "Carried", "🐾", "green", 3),
 	}
 	for attribute, label in labels do
 		local function refresh(animate: boolean)
 			local value = player:GetAttribute(attribute)
-			local text = CurrencyHud.format(if typeof(value) == "number" then value else 0)
+			local number = if typeof(value) == "number" then value else 0
+			local text = if attribute == "CarriedCount"
+				then `{number}/{TamingConfig.carryCapacity}`
+				else CurrencyHud.format(number)
 			if text ~= label.Text and animate then
 				bump(label)
 			end

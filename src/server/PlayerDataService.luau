@@ -9,9 +9,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
+local AnimalCollection = require(script.Parent.AnimalCollection)
 
--- Version history: 1 = progress flags + discovered; 2 = + coins, stamina (P1). Older saves load
--- through `reconcile`, which fills anything missing with defaults — no separate migration step.
+-- Version history: 1 = progress flags + discovered; 2 = + coins, stamina (P1); 3 = + animals,
+-- nextAnimalId (P2). Older saves load through `reconcile`, which fills anything missing with
+-- defaults — no separate migration step.
 export type PlayerData = {
 	version: number,
 	tutorialCompleted: boolean,
@@ -21,6 +23,8 @@ export type PlayerData = {
 	discovered: { [string]: boolean },
 	coins: number,
 	stamina: number,
+	animals: { AnimalCollection.AnimalRecord }, -- see AnimalCollection
+	nextAnimalId: number,
 }
 
 type Profile = {
@@ -34,9 +38,9 @@ type Profile = {
 local PlayerDataService = {}
 
 -- Studio playtests use their own store so testing (including resets) never touches live player data.
--- The store name keeps "v1" on purpose: v2 data lives in the same keys (see `reconcile`).
+-- The store name keeps "v1" on purpose: v2+ data lives in the same keys (see `reconcile`).
 local STORE_NAME = if RunService:IsStudio() then "PlayerData_v1_Studio" else "PlayerData_v1"
-local DATA_VERSION = 2
+local DATA_VERSION = 3
 local LOAD_ATTEMPTS = 3
 
 local store: DataStore? = nil
@@ -52,6 +56,8 @@ local function defaults(): PlayerData
 		discovered = {},
 		coins = EconomyConfig.startingCoins,
 		stamina = EconomyConfig.startingStamina,
+		animals = {},
+		nextAnimalId = 1,
 	}
 end
 
@@ -81,6 +87,9 @@ local function reconcile(saved: any): PlayerData
 	end
 	data.coins = sanitizeNumber(saved.coins, data.coins, 0, EconomyConfig.maxCoins)
 	data.stamina = sanitizeNumber(saved.stamina, data.stamina, 0, EconomyConfig.maxStamina)
+	local owner = AnimalCollection.sanitize(saved.animals, saved.nextAnimalId)
+	data.animals = owner.animals
+	data.nextAnimalId = owner.nextAnimalId
 	return data
 end
 
@@ -101,6 +110,8 @@ local function publish(player: Player, data: PlayerData)
 	player:SetAttribute("Discovered", table.concat(discovered, ","))
 	player:SetAttribute("Coins", data.coins)
 	player:SetAttribute("Stamina", data.stamina)
+	player:SetAttribute("CarriedCount", AnimalCollection.countCarried(data))
+	player:SetAttribute("CarriedSpecies", AnimalCollection.carriedSpecies(data))
 end
 
 local function save(player: Player)
@@ -118,6 +129,10 @@ local function save(player: Player)
 		profile.unsaved = false
 		local snapshot = table.clone(profile.data)
 		snapshot.discovered = table.clone(profile.data.discovered)
+		snapshot.animals = table.create(#profile.data.animals)
+		for i, record in profile.data.animals do
+			snapshot.animals[i] = table.clone(record)
+		end
 		local ok, err = pcall(function()
 			(store :: DataStore):UpdateAsync(keyFor(player), function()
 				return snapshot

@@ -6,6 +6,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AnimalConfig = require(ReplicatedStorage.Shared.Config.AnimalConfig)
 local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
 local HerdSchedule = require(ReplicatedStorage.Shared.Herds.HerdSchedule)
 local Net = require(script.Parent.Net)
@@ -21,6 +22,12 @@ type Run = {
 	herdMembers: { [string]: HerdMemberInfo },
 	usedMembers: { [string]: boolean },
 	switches: number,
+	-- Taming (D-024): the herd animal currently ridden (nil = starting mount) and when the server
+	-- accepted that switch. `tamed` survives "Ride again" (same seed, same herds), so a restart can
+	-- never let the same animal be tamed twice.
+	mountMember: string?,
+	mountedAt: number,
+	tamed: { [string]: boolean },
 	connections: { RBXScriptConnection },
 }
 
@@ -120,6 +127,9 @@ function SafariService.startRun(player: Player, courseId: string)
 		herdMembers = buildHerdMembers(CourseConfig.courses[courseId], seed),
 		usedMembers = {},
 		switches = 0,
+		mountMember = nil,
+		mountedAt = 0,
+		tamed = {},
 		connections = {},
 	}
 	runs[player] = run
@@ -147,12 +157,22 @@ local function switchMount(player: Player, memberId: any)
 	end
 	local member = run.herdMembers[memberId]
 	local elapsed = os.clock() - run.startedAt
-	if not member or run.usedMembers[memberId] or member.distance - REACH_SLACK > elapsed * MAX_PLAUSIBLE_SPEED then
+	if not member or run.usedMembers[memberId] or run.tamed[memberId] or member.distance - REACH_SLACK > elapsed * MAX_PLAUSIBLE_SPEED then
 		warn(`SafariService: rejected switch from {player.Name} to "{memberId}"`)
 		return
 	end
+	local data = PlayerDataService.get(player)
+	if not data or data.stamina < AnimalConfig[member.species].requiredStamina then
+		warn(`SafariService: rejected switch from {player.Name} to "{memberId}" (not enough stamina)`)
+		return
+	end
+	if runs[player] ~= run then
+		return -- the run ended while data was loading
+	end
 	run.usedMembers[memberId] = true
 	run.switches += 1
+	run.mountMember = memberId
+	run.mountedAt = os.clock()
 	player:SetAttribute("MountSpecies", member.species)
 end
 
@@ -165,7 +185,29 @@ local function restartRun(player: Player)
 	run.startedAt = os.clock()
 	table.clear(run.usedMembers)
 	run.switches = 0
+	run.mountMember = nil
 	player:SetAttribute("MountSpecies", STARTING_SPECIES)
+end
+
+-- The herd animal the player is riding (server-confirmed): member id, species, and os.clock() when
+-- the switch was accepted. Nil while on the starting mount or off safari.
+function SafariService.getMount(player: Player): (string?, string?, number?)
+	local run = runs[player]
+	local memberId = run and run.mountMember
+	if not run or not memberId then
+		return nil, nil, nil
+	end
+	return memberId, run.herdMembers[memberId].species, run.mountedAt
+end
+
+-- Marks the current mount tamed. Returns false if it was already tamed this run.
+function SafariService.markTamed(player: Player, memberId: string): boolean
+	local run = runs[player]
+	if not run or run.mountMember ~= memberId or run.tamed[memberId] then
+		return false
+	end
+	run.tamed[memberId] = true
+	return true
 end
 
 function SafariService.start(startPrompt: ProximityPrompt, spawnCFrame: CFrame)

@@ -14,7 +14,7 @@ export type AnimalStats = {
 	touchFollowGain: number, -- how hard the animal chases the thumb's target position
 	jumpHeight: number,
 	jumpDuration: number,
-	temperDuration: number, -- seconds of riding until fully restless
+	temperDuration: number, -- base Grip seconds (scaled by stamina — TamingConfig.gripSeconds)
 	temperWarningAt: number, -- 0..1 fraction where warnings start
 	hitboxHalfWidth: number,
 	hitboxHalfLength: number,
@@ -25,6 +25,9 @@ export type AnimalStats = {
 	pitchAmplitude: number,
 	turnYaw: number,
 	turnLean: number,
+	-- Taming (P2, D-024)
+	requiredStamina: number, -- stamina needed to leap onto a wild one
+	tameTime: number, -- seconds to stay on a wild one to tame it
 	-- Herd behaviour (wild animals)
 	herdWeight: number, -- relative chance a herd is this species
 	herdMin: number,
@@ -58,6 +61,8 @@ local AnimalConfig: { [string]: AnimalStats } = {
 		pitchAmplitude = 0.07,
 		turnYaw = 0.8,
 		turnLean = 0.006,
+		requiredStamina = 5,
+		tameTime = 4,
 		herdWeight = 5,
 		herdMin = 3,
 		herdMax = 5,
@@ -89,6 +94,8 @@ local AnimalConfig: { [string]: AnimalStats } = {
 		pitchAmplitude = 0.04,
 		turnYaw = 0.5,
 		turnLean = 0.004,
+		requiredStamina = 25,
+		tameTime = 9,
 		herdWeight = 2,
 		herdMin = 1,
 		herdMax = 2,
@@ -119,6 +126,8 @@ local AnimalConfig: { [string]: AnimalStats } = {
 		pitchAmplitude = 0.05,
 		turnYaw = 0.6,
 		turnLean = 0.005,
+		requiredStamina = 12,
+		tameTime = 6,
 		herdWeight = 3,
 		herdMin = 2,
 		herdMax = 3,

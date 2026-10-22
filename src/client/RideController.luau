@@ -1,23 +1,30 @@
 --!strict
 -- Client-driven arcade riding (D-007, D-016): auto-run forward with a speed ramp, free horizontal
--- steering, jump, temper, obstacle checks, speed-reactive camera, and leaping between animals.
+-- steering, jump, grip, obstacle checks, speed-reactive camera, leaping between animals, and taming.
 -- The mount is a client-side AnimalAgent with the rider welded on; leaps are predicted instantly
--- here and validated by the server (SwitchMount).
+-- here and validated by the server (SwitchMount). Taming (D-024): staying on a wild herd animal
+-- fills a tame bar; when full the server validates the tame (TameAnimal) - switching alone never
+-- collects anything.
 
 local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GuiService = game:GetService("GuiService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
+local AnimalConfig = require(ReplicatedStorage.Shared.Config.AnimalConfig)
 local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
+local TamingConfig = require(ReplicatedStorage.Shared.Config.TamingConfig)
 local AnimalAgent = require(script.Parent.AnimalAgent)
 local CourseObstacles = require(script.Parent.CourseObstacles)
 local RideHud = require(script.Parent.RideHud)
+local UiKit = require(script.Parent.UiKit)
 
 type Leap = {
 	target: AnimalAgent.AnimalAgent,
+	memberId: string,
 	elapsed: number,
 	fromPosition: Vector3,
 	lastPosition: Vector3,
@@ -54,11 +61,26 @@ local LEAP_BOOST_TIME = 1.5
 local LAND_GRACE = 0.5 -- seconds after landing with no crashes
 local LEAP_RESUME_TIME = 0.25 -- real seconds to return to normal speed when a leap starts
 
--- Simulation clock (D-019): one time scale for the whole local safari (rider, herds, temper, jumps).
+-- Taming (D-024)
+type TameState = "none" | "taming" | "pending" | "tamed" | "failed"
+local TAME_REPLY_TIMEOUT = 3 -- real seconds to wait for the server before giving up on a tame
+local STAMINA_MESSAGE_COOLDOWN = 1
+
+local TAME_FAILURES: { [string]: string } = {
+	full = "Hands full! Carrying 7 animals",
+	stamina = "Not enough stamina!",
+}
+
+-- Simulation clock (D-019): one time scale for the whole local safari (rider, herds, grip, jumps).
 -- Steering keeps at least this fraction of real time so players can line up during slow motion.
 local STEER_MIN_SCALE = 0.6
 
 local hintShown = false
+
+local function playerStamina(): number
+	local value = Players.LocalPlayer:GetAttribute("Stamina")
+	return if typeof(value) == "number" then value else 0
+end
 
 local function damp(rate: number, dt: number): number
 	return 1 - math.exp(-rate * dt)
@@ -143,6 +165,7 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	self.returnRemote = remotes:WaitForChild("ReturnToSanctuary") :: RemoteEvent
 	self.restartRemote = remotes:WaitForChild("RestartRun") :: RemoteEvent
 	self.switchRemote = remotes:WaitForChild("SwitchMount") :: RemoteEvent
+	self.tameRemote = remotes:WaitForChild("TameAnimal") :: RemoteEvent
 	-- Ride inputs are bound at high priority and seated characters ignore walk input, so the only
 	-- default control to suppress is the on-screen touch joystick/jump button.
 	self.touchControlsWereEnabled = GuiService.TouchControlsEnabled
@@ -171,7 +194,17 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	self.graceTime = 0
 	self.x = 0
 	self.steerVelocity = 0
-	self:setMount(AnimalAgent.new(STARTING_SPECIES, course, 0, 0, false))
+	-- Taming. `tamedMembers` lasts the whole safari (Ride again replays the same herds), so a tamed
+	-- animal never respawns; `secured` counts tames since the last (re)start for the run summary.
+	self.mountMember = nil :: string?
+	self.tameState = "none" :: TameState
+	self.tameProgress = 0
+	self.tameSentAt = 0
+	self.tamedMembers = {} :: { [string]: boolean }
+	self.secured = 0
+	self.lastStaminaMessage = 0
+	self.gripSeconds = 1
+	self:setMount(AnimalAgent.new(STARTING_SPECIES, course, 0, 0, false), nil)
 	self.seenSpecies[STARTING_SPECIES] = true
 	self.cameraX = 0
 	self.cameraY = CourseConfig.groundY + self.rootHeight + 9
@@ -182,6 +215,9 @@ function RideController.new(courseId: string, humanoid: Humanoid)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
 
 	self:bindInput()
+	table.insert(self.connections, self.tameRemote.OnClientEvent:Connect(function(memberId: string, ok: boolean, detail: string?)
+		self:onTameResult(memberId, ok, detail)
+	end))
 	self:reset()
 
 	if not hintShown and not course.tutorial then
@@ -202,16 +238,72 @@ end
 
 export type RideController = typeof(RideController.new("", Instance.new("Humanoid")))
 
--- Makes `agent` the ridden mount: welds the rider on and adopts its stats.
-function RideController.setMount(self: RideController, agent: AnimalAgent.AnimalAgent)
+-- Makes `agent` the ridden mount: welds the rider on and adopts its stats. `memberId` is the herd
+-- animal's id (nil for the starting mount, which is already yours and can't be tamed).
+function RideController.setMount(self: RideController, agent: AnimalAgent.AnimalAgent, memberId: string?)
 	agent:setRidden(true)
 	self.agent = agent
 	self.root = agent.root
 	self.stats = agent.stats
 	self.rootHeight = agent.rootHeight
+	-- Grip (formerly temper): seconds before being bucked off, scaled by stamina (TamingConfig).
+	self.gripSeconds = TamingConfig.gripSeconds(agent.stats.temperDuration, playerStamina())
 	self.dust = makeDust(agent.root, agent.rootHeight)
 	self.riderWeld = attachRider(agent, self.humanoid)
 	self.hud:setAnimal(agent.species, agent.stats)
+	local requirement = agent.model:FindFirstChild("StaminaLabel")
+	if requirement then
+		requirement:Destroy()
+	end
+
+	self.mountMember = memberId
+	self.tameProgress = 0
+	if memberId and not self.tamedMembers[memberId] then
+		self.tameState = "taming"
+		self.hud:setTame(0, "STAY ON TO TAME IT!")
+	else
+		self.tameState = "none"
+		self.hud:setTame(nil)
+	end
+end
+
+function RideController.updateTame(self: RideController, dt: number)
+	if self.tameState == "taming" then
+		self.tameProgress = math.min(self.tameProgress + dt / self.stats.tameTime, 1)
+		local almost = self.tameProgress >= TamingConfig.almostTamedAt
+		local text = if almost then "Hold on! It's almost tamed!" else string.format("TAMING %d%%", math.floor(self.tameProgress * 100))
+		self.hud:setTame(self.tameProgress, text)
+		if self.tameProgress >= 1 then
+			self.tameState = "pending"
+			self.tameSentAt = os.clock()
+			self.hud:setTame(1, "SECURING...")
+			self.tameRemote:FireServer(self.mountMember)
+		end
+	elseif self.tameState == "pending" and os.clock() - self.tameSentAt > TAME_REPLY_TIMEOUT then
+		self.tameState = "failed"
+		self.hud:setTame(nil)
+	end
+end
+
+-- Server reply to a tame request. Only a confirmed tame counts, even if the rider has moved on.
+function RideController.onTameResult(self: RideController, memberId: string, ok: boolean, detail: string?)
+	local current = memberId == self.mountMember
+	if ok then
+		self.tamedMembers[memberId] = true
+		self.secured += 1
+		if current then
+			local stats = AnimalConfig[detail or ""]
+			self.tameState = "tamed"
+			self.temper = 0 -- a tamed animal calms down
+			self.hud:setTame(1, `{string.upper(if stats then stats.displayName else "animal")} TAMED!`)
+			self.hud:showMessage("IT'S YOURS!", 1.2)
+			self.shake = 0.2
+		end
+	elseif current then
+		self.tameState = "failed"
+		self.hud:setTame(nil)
+		self.hud:showMessage(TAME_FAILURES[detail or ""] or "It got away!", 1.5)
+	end
 end
 
 -- Menus pause the local safari (D-022). Safe with the shared simulation clock (D-019): the server
@@ -244,14 +336,15 @@ function RideController.reset(self: RideController)
 		leap.target:destroy()
 		self.leap = nil
 	end
-	-- "Ride again" always starts on the starting species.
-	if self.agent.species ~= STARTING_SPECIES or not self.agent.model.Parent then
+	-- "Ride again" always starts on the starting mount (not a wild animal of the same species).
+	if self.agent.species ~= STARTING_SPECIES or self.mountMember ~= nil or not self.agent.model.Parent then
 		self:detachRider()
 		if self.agent.model.Parent then
 			self.agent:destroy()
 		end
-		self:setMount(AnimalAgent.new(STARTING_SPECIES, self.course, 0, 0, false))
+		self:setMount(AnimalAgent.new(STARTING_SPECIES, self.course, 0, 0, false), nil)
 	end
+	self.secured = 0
 	CourseObstacles.reset(self.obstacles)
 	for _, part in self.hiddenParts do
 		part.LocalTransparencyModifier = 0
@@ -275,7 +368,7 @@ function RideController.reset(self: RideController)
 	self.touchTargetX = nil
 	self.hud:setEndPanelVisible(false)
 	self.hud:showMessage("Ready...")
-	self.hud:setTemper(0, self.stats.temperWarningAt)
+	self.hud:setGrip(0, self.stats.temperWarningAt)
 	self.hud:setDistance(0, self.course.length)
 	self.restartRemote:FireServer()
 end
@@ -312,6 +405,10 @@ function RideController.leapToTarget(self: RideController)
 	local target = herds and herds.target
 	if target then
 		self:startLeap(target)
+	elseif herds and herds.lockedTarget and os.clock() - self.lastStaminaMessage > STAMINA_MESSAGE_COOLDOWN then
+		self.lastStaminaMessage = os.clock()
+		local stats = herds.lockedTarget.agent.stats
+		self.hud:showMessage(`Not enough stamina! Need ⚡{stats.requiredStamina}`, 1.5)
 	end
 end
 
@@ -323,14 +420,23 @@ function RideController.startLeap(self: RideController, wild: any)
 	local target = wild.agent :: AnimalAgent.AnimalAgent
 	self.herds:take(wild)
 
-	-- The old mount rejoins the herd as a wild animal and drifts away.
+	-- The old mount rejoins the herd as a wild animal and drifts away - unless it was tamed: then
+	-- it's yours and heads home (carried) instead.
 	local oldMount = self.agent
 	self:detachRider()
-	self.herds:release(oldMount)
+	if self.mountMember and self.tamedMembers[self.mountMember] then
+		oldMount:destroy()
+	else
+		self.herds:release(oldMount)
+	end
+	self.mountMember = nil
+	self.tameState = "none"
+	self.hud:setTame(nil)
 
 	local gap = target.distance - self.distance
 	self.leap = {
 		target = target,
+		memberId = wild.id,
 		elapsed = 0,
 		fromPosition = rootPart.Position,
 		lastPosition = rootPart.Position,
@@ -381,7 +487,7 @@ function RideController.land(self: RideController)
 	local target = leap.target
 	self.leap = nil
 	self.leapHeight = 0
-	self:setMount(target)
+	self:setMount(target, leap.memberId)
 
 	self.distance = target.distance
 	self.x = target.x
@@ -492,6 +598,13 @@ function RideController.endRun(self: RideController, text: string, shake: number
 	self:setTimeScale(1, 0.15)
 	self.shake = shake
 	self.hud:showMessage(text)
+	if self.tameState == "taming" then
+		self.tameState = "failed" -- the tame bar never filled: nothing is collected
+		self.hud:setTame(nil)
+	end
+	if self.secured > 0 then
+		UiKit.toast(`GREAT RUN! You caught {self.secured} animal{if self.secured == 1 then "" else "s"}!`, 4)
+	end
 	task.delay(END_PANEL_DELAY, function()
 		if self.state == "ended" and self.hud.gui.Parent then
 			self.hud:setEndPanelVisible(true)
@@ -587,8 +700,9 @@ function RideController.updateRunning(self: RideController, dt: number)
 	self.speed = moveToward(self.speed, targetSpeed, LAUNCH_ACCELERATION * dt)
 	self.distance += self.speed * dt
 	if self.temperEnabled then
-		self.temper += dt / stats.temperDuration
+		self.temper += dt / self.gripSeconds
 	end
+	self:updateTame(dt)
 	self:updateJump(dt)
 	self.graceTime = math.max(self.graceTime - dt, 0)
 
@@ -657,7 +771,7 @@ function RideController.step(self: RideController, realDt: number)
 	end
 
 	if self.temperEnabled then
-		self.hud:setTemper(self.temper, self.stats.temperWarningAt)
+		self.hud:setGrip(self.temper, self.stats.temperWarningAt)
 	end
 	self.hud:setDistance(self.distance, self.course.length)
 	local target = herds and herds.target

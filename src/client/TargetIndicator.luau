@@ -14,6 +14,7 @@ local TargetIndicator = {}
 TargetIndicator.__index = TargetIndicator
 
 local TARGET_COLOR = Color3.fromRGB(255, 220, 70)
+local LOCKED_COLOR = Color3.fromRGB(255, 90, 90)
 
 function TargetIndicator.new()
 	local ring = Instance.new("Part")
@@ -60,7 +61,12 @@ end
 
 export type TargetIndicator = typeof(TargetIndicator.new())
 
-function TargetIndicator.show(self: TargetIndicator, model: Model, displayName: string, radius: number, labelHeight: number)
+-- `locked` = the player lacks the stamina to leap onto it (D-024): red, with the requirement.
+function TargetIndicator.show(self: TargetIndicator, model: Model, displayName: string, radius: number, labelHeight: number, requiredStamina: number, locked: boolean)
+	local color = if locked then LOCKED_COLOR else TARGET_COLOR
+	self.ring.Color = color
+	self.highlight.FillColor = color
+	self.label.TextColor3 = color
 	local root = model.PrimaryPart :: BasePart
 	local position = root.Position
 	local diameter = radius * 2
@@ -74,7 +80,7 @@ function TargetIndicator.show(self: TargetIndicator, model: Model, displayName: 
 	self.highlight.FillTransparency = 0.5 + math.sin(os.clock() * 8) * 0.1
 	self.billboard.Adornee = root
 	self.billboard.StudsOffset = Vector3.new(0, labelHeight, 0)
-	self.label.Text = `▼ {displayName} — {self.buttonText}`
+	self.label.Text = if locked then `🔒 {displayName} — Need ⚡{requiredStamina}` else `▼ {displayName} ⚡{requiredStamina} — {self.buttonText}`
 	self.billboard.Enabled = true
 end
 

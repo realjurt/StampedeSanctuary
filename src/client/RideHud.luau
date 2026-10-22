@@ -1,6 +1,6 @@
 --!strict
 -- Safari HUD in the Outlined Radiance style (D-022). Layout keeps the centre of the screen clear:
--- animal + temper + distance + ability top-centre, menu buttons left, control hints bottom-left,
+-- animal + grip + distance + ability (+ tame bar while taming) top-centre, menu buttons left, control hints bottom-left,
 -- leap target chip bottom-centre, mobile JUMP/LEAP bottom-right.
 
 local UserInputService = game:GetService("UserInputService")
@@ -10,11 +10,13 @@ local UiKit = require(script.Parent.UiKit)
 local RideHud = {}
 RideHud.__index = RideHud
 
-local TEMPER_COLORS = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, UiKit.PALETTE.green.top),
-	ColorSequenceKeypoint.new(0.62, UiKit.PALETTE.yellow.top),
-	ColorSequenceKeypoint.new(1, UiKit.PALETTE.red.top),
+-- Grip drains right-to-left, so the low end (left) is red and a full bar ends in green (D-024).
+local GRIP_COLORS = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, UiKit.PALETTE.red.top),
+	ColorSequenceKeypoint.new(0.38, UiKit.PALETTE.yellow.top),
+	ColorSequenceKeypoint.new(1, UiKit.PALETTE.green.top),
 })
+local TAME_COLORS = UiKit.verticalSequence("pink")
 
 type InputKind = "keyboard" | "gamepad" | "touch"
 
@@ -83,8 +85,8 @@ function RideHud.new()
 	self.leapReady = nil :: boolean?
 	self.leapTargetName = nil :: string?
 
-	-- Top-centre: current animal, temper, distance, ability
-	local top = container(gui, "Status", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 10), Vector2.new(460, 150))
+	-- Top-centre: current animal, grip, distance, ability, tame progress
+	local top = container(gui, "Status", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 10), Vector2.new(460, 186))
 	local animalRow = row(top, "Animal", 10)
 	animalRow.AnchorPoint = Vector2.new(0.5, 0)
 	animalRow.Position = UDim2.fromScale(0.5, 0)
@@ -104,7 +106,7 @@ function RideHud.new()
 	self.animalIcon = tileIcon
 	self.animalName = autoLabel(animalRow, "Name", "", 30)
 
-	local temper = UiKit.bar(top, "Temper", TEMPER_COLORS, 18)
+	local temper = UiKit.bar(top, "Grip", GRIP_COLORS, 18)
 	temper.frame.Position = UDim2.fromOffset(0, 48)
 	temper.frame.Size = UDim2.fromOffset(460, 32)
 	self.temper = temper
@@ -128,6 +130,13 @@ function RideHud.new()
 	abilityPadding.Parent = ability
 	self.ability = autoLabel(ability, "Text", "", 22)
 	self.ability.TextColor3 = UiKit.PALETTE.yellow.top
+
+	local tame = UiKit.bar(top, "Tame", TAME_COLORS, 16)
+	tame.frame.AnchorPoint = Vector2.new(0.5, 0)
+	tame.frame.Position = UDim2.new(0.5, 0, 0, 152)
+	tame.frame.Size = UDim2.fromOffset(340, 28)
+	tame.frame.Visible = false
+	self.tame = tame
 
 	-- Left: menu buttons
 	local nav = container(gui, "Menu", Vector2.new(0, 0.5), UDim2.new(0, 14, 0.5, 0), Vector2.new(160, 222))
@@ -260,16 +269,25 @@ function RideHud.setAnimal(self: RideHud, species: string, stats: any)
 	self.ability.Text = string.upper(string.sub(ability, 1, 1)) .. string.sub(ability, 2)
 end
 
-function RideHud.setTemper(self: RideHud, fraction: number, warningAt: number)
+-- `used` is the fraction of grip spent (0 = fresh mount, 1 = bucked off); the bar shows what's left.
+function RideHud.setGrip(self: RideHud, used: number, warningAt: number)
 	if self.befriending then
 		self.befriending = false
-		self.temper.setColor(TEMPER_COLORS)
+		self.temper.setColor(GRIP_COLORS)
 	end
-	local text = if fraction >= 0.9 then "HOLD ON!" elseif fraction >= warningAt then "RESTLESS!" else "TEMPER"
-	self.temper.set(fraction, text)
+	local text = if used >= 0.9 then "HOLD ON!" elseif used >= warningAt then "SLIPPING!" else "GRIP"
+	self.temper.set(1 - used, text)
 end
 
--- Tutorial variant of the top meter: befriending progress instead of temper.
+-- Tame progress under the status block; hidden when `fraction` is nil.
+function RideHud.setTame(self: RideHud, fraction: number?, text: string?)
+	self.tame.frame.Visible = fraction ~= nil
+	if fraction then
+		self.tame.set(fraction, text)
+	end
+end
+
+-- Tutorial variant of the top meter: befriending progress instead of grip.
 function RideHud.setBefriending(self: RideHud, fraction: number, animalName: string)
 	if not self.befriending then
 		self.befriending = true

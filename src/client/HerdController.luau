@@ -4,13 +4,17 @@
 -- target (shown by TargetIndicator). Herd animals never crash the rider and only sidestep when
 -- actually overlapping, so they stay catchable (D-017). Stepped by RideController with the ride's
 -- simulation clock, so slow motion affects rider and herds identically (D-019).
+-- Taming (D-024): each wild animal shows its stamina requirement; only animals the player has the
+-- stamina for can be the leap `target`. The best one they can't mount yet is `lockedTarget`.
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local HerdSchedule = require(ReplicatedStorage.Shared.Herds.HerdSchedule)
 local AnimalAgent = require(script.Parent.AnimalAgent)
 local CourseObstacles = require(script.Parent.CourseObstacles)
 local TargetIndicator = require(script.Parent.TargetIndicator)
+local UiKit = require(script.Parent.UiKit)
 
 export type Wild = {
 	agent: AnimalAgent.AnimalAgent,
@@ -38,6 +42,29 @@ local RIDER_AVOID_SHIFT = 3
 local SEPARATION_LENGTH = 5
 local SEPARATION_WIDTH = 3.5
 local RESET_THRESHOLD = 20 -- rider distance jumping back this far means "Ride again"
+local LOCKED_PENALTY = 1000 -- any mountable animal in reach beats one the player can't mount
+local STAMINA_LABEL_DISTANCE = 120
+
+local function playerStamina(): number
+	local value = Players.LocalPlayer:GetAttribute("Stamina")
+	return if typeof(value) == "number" then value else 0
+end
+
+-- Small "⚡N" over a wild animal: green if the player has the stamina for it, red if not.
+local function addStaminaLabel(agent: AnimalAgent.AnimalAgent)
+	local required = agent.stats.requiredStamina
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "StaminaLabel"
+	billboard.Size = UDim2.fromOffset(90, 34)
+	billboard.StudsOffset = Vector3.new(0, agent.rootHeight + 3.5, 0)
+	billboard.MaxDistance = STAMINA_LABEL_DISTANCE
+	billboard.LightInfluence = 0
+	billboard.Adornee = agent.root
+	billboard.Parent = agent.model
+	local label = UiKit.label(billboard, "Text", `⚡{required}`, 24)
+	label.Size = UDim2.fromScale(1, 1)
+	label.TextColor3 = if playerStamina() >= required then UiKit.PALETTE.green.top else UiKit.PALETTE.red.top
+end
 
 local function moveToward(current: number, target: number, maxDelta: number): number
 	if current < target then
@@ -55,6 +82,7 @@ function HerdController.new(ride: any, seed: number)
 	self.nextHerd = 1
 	self.wild = {} :: { Wild }
 	self.target = nil :: Wild?
+	self.lockedTarget = nil :: Wild?
 	self.indicator = TargetIndicator.new()
 	self.lastRiderDistance = ride.distance
 	self.time = 0 -- simulation time; drives wander so it slows with the ride
@@ -69,13 +97,18 @@ function HerdController.clear(self: HerdController)
 	end
 	table.clear(self.wild)
 	self.target = nil
+	self.lockedTarget = nil
 	self.indicator:hide()
 end
 
 function HerdController.spawnHerd(self: HerdController, herd: HerdSchedule.Herd)
 	for _, member in herd.members do
+		if self.ride.tamedMembers[member.id] then
+			continue -- already tamed this safari (Ride again replays the same herds)
+		end
 		local agent = AnimalAgent.new(member.species, self.course, member.distance, member.x, true)
 		agent.speed = agent.stats.herdMinSpeed
+		addStaminaLabel(agent)
 		table.insert(self.wild, {
 			agent = agent,
 			id = member.id,
@@ -96,6 +129,9 @@ function HerdController.take(self: HerdController, wild: Wild)
 	if self.target == wild then
 		self.target = nil
 		self.indicator:hide()
+	end
+	if self.lockedTarget == wild then
+		self.lockedTarget = nil
 	end
 end
 
@@ -183,24 +219,28 @@ end
 function HerdController.updateTarget(self: HerdController)
 	local ride = self.ride
 	local best: Wild? = nil
+	local bestLocked = false
 	if ride.state == "running" then
+		local stamina = playerStamina()
 		local bias = ride.steerVelocity * 0.25
 		local bestScore = math.huge
 		for _, wild in self.wild do
 			local ahead = wild.agent.distance - ride.distance
 			local side = wild.agent.x - ride.x
 			if not wild.released and ahead >= TARGET_MIN_AHEAD and ahead <= TARGET_MAX_AHEAD and math.abs(side) <= TARGET_MAX_SIDE then
-				local score = math.abs(side - bias) + ahead * 0.3
+				local locked = stamina < wild.agent.stats.requiredStamina
+				local score = math.abs(side - bias) + ahead * 0.3 + (if locked then LOCKED_PENALTY else 0)
 				if score < bestScore then
-					best, bestScore = wild, score
+					best, bestScore, bestLocked = wild, score, locked
 				end
 			end
 		end
 	end
-	self.target = best
+	self.target = if bestLocked then nil else best
+	self.lockedTarget = if bestLocked then best else nil
 	if best then
 		local agent = best.agent
-		self.indicator:show(agent.model, agent.stats.displayName, agent.stats.hitboxHalfLength + 1, agent.rootHeight + 1)
+		self.indicator:show(agent.model, agent.stats.displayName, agent.stats.hitboxHalfLength + 1, agent.rootHeight + 1, agent.stats.requiredStamina, bestLocked)
 	else
 		self.indicator:hide()
 	end

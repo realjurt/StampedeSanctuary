@@ -9,6 +9,7 @@ local PlayerDataService = require(script.Parent.PlayerDataService)
 local PlotService = require(script.Parent.PlotService)
 local SafariService = require(script.Parent.SafariService)
 local SanctuaryBuilder = require(script.Parent.SanctuaryBuilder)
+local TameService = require(script.Parent.TameService)
 
 CourseBuilder.applyLighting()
 for courseId in CourseConfig.courses do
@@ -21,3 +22,4 @@ PlotService.start(sanctuary.plots)
 DevCommands.start()
 OnboardingService.start(sanctuary.skipPrompt)
 SafariService.start(sanctuary.startPrompt, sanctuary.spawnCFrame)
+TameService.start()
