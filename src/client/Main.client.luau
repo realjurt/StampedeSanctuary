@@ -4,6 +4,7 @@
 
 local Players = game:GetService("Players")
 
+local CurrencyHud = require(script.Parent.CurrencyHud)
 local HerdController = require(script.Parent.HerdController)
 local LeapTutorial = require(script.Parent.LeapTutorial)
 local MenuController = require(script.Parent.MenuController)
@@ -92,5 +93,6 @@ if player.Character then
 	task.spawn(syncRide)
 end
 
+task.spawn(CurrencyHud.start)
 task.spawn(OnboardingController.start)
 task.spawn(SanctuaryView.start)

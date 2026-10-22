@@ -5,8 +5,13 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
+
+-- Version history: 1 = progress flags + discovered; 2 = + coins, stamina (P1). Older saves load
+-- through `reconcile`, which fills anything missing with defaults — no separate migration step.
 export type PlayerData = {
 	version: number,
 	tutorialCompleted: boolean,
@@ -14,20 +19,24 @@ export type PlayerData = {
 	onboardingDismissed: boolean,
 	leapTutorialDone: boolean, -- first-time slow-motion leap lesson learned or skipped (D-021)
 	discovered: { [string]: boolean },
+	coins: number,
+	stamina: number,
 }
 
 type Profile = {
 	data: PlayerData,
 	canSave: boolean,
 	saving: boolean,
-	dirty: boolean,
+	dirty: boolean, -- changed while a save was in flight: save again
+	unsaved: boolean, -- changed with deferSave: the autosave loop writes it
 }
 
 local PlayerDataService = {}
 
 -- Studio playtests use their own store so testing (including resets) never touches live player data.
+-- The store name keeps "v1" on purpose: v2 data lives in the same keys (see `reconcile`).
 local STORE_NAME = if RunService:IsStudio() then "PlayerData_v1_Studio" else "PlayerData_v1"
-local DATA_VERSION = 1
+local DATA_VERSION = 2
 local LOAD_ATTEMPTS = 3
 
 local store: DataStore? = nil
@@ -41,7 +50,17 @@ local function defaults(): PlayerData
 		onboardingDismissed = false,
 		leapTutorialDone = false,
 		discovered = {},
+		coins = EconomyConfig.startingCoins,
+		stamina = EconomyConfig.startingStamina,
 	}
+end
+
+-- A saved number is used only if it is a real, finite value; it is clamped into range.
+local function sanitizeNumber(value: any, fallback: number, minimum: number, maximum: number): number
+	if typeof(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then
+		return fallback
+	end
+	return math.clamp(value, minimum, maximum)
 end
 
 local function reconcile(saved: any): PlayerData
@@ -60,6 +79,8 @@ local function reconcile(saved: any): PlayerData
 			end
 		end
 	end
+	data.coins = sanitizeNumber(saved.coins, data.coins, 0, EconomyConfig.maxCoins)
+	data.stamina = sanitizeNumber(saved.stamina, data.stamina, 0, EconomyConfig.maxStamina)
 	return data
 end
 
@@ -78,6 +99,8 @@ local function publish(player: Player, data: PlayerData)
 	end
 	table.sort(discovered)
 	player:SetAttribute("Discovered", table.concat(discovered, ","))
+	player:SetAttribute("Coins", data.coins)
+	player:SetAttribute("Stamina", data.stamina)
 end
 
 local function save(player: Player)
@@ -92,6 +115,7 @@ local function save(player: Player)
 	profile.saving = true
 	repeat
 		profile.dirty = false
+		profile.unsaved = false
 		local snapshot = table.clone(profile.data)
 		snapshot.discovered = table.clone(profile.data.discovered)
 		local ok, err = pcall(function()
@@ -126,7 +150,7 @@ local function load(player: Player)
 	if not player.Parent then
 		return
 	end
-	profiles[player] = { data = data, canSave = canSave, saving = false, dirty = false }
+	profiles[player] = { data = data, canSave = canSave, saving = false, dirty = false, unsaved = false }
 	publish(player, data)
 	player:SetAttribute("DataSaveDisabled", not canSave)
 	player:SetAttribute("DataLoaded", true)
@@ -141,15 +165,20 @@ function PlayerDataService.get(player: Player): PlayerData?
 	return if profile then profile.data else nil
 end
 
--- Applies a change, republishes attributes, and saves in the background.
-function PlayerDataService.update(player: Player, mutator: (PlayerData) -> ())
+-- Applies a change, republishes attributes, and saves in the background. Pass `deferSave` for
+-- frequent small changes (income ticks, training): the autosave loop writes them instead.
+function PlayerDataService.update(player: Player, mutator: (PlayerData) -> (), deferSave: boolean?)
 	local profile = profiles[player]
 	if not profile then
 		return
 	end
 	mutator(profile.data)
 	publish(player, profile.data)
-	task.spawn(save, player)
+	if deferSave then
+		profile.unsaved = true
+	else
+		task.spawn(save, player)
+	end
 end
 
 -- Developer tool (see DevCommands). Replaces the in-memory profile with defaults *first*, so old
@@ -193,6 +222,17 @@ function PlayerDataService.start()
 	Players.PlayerRemoving:Connect(function(player)
 		save(player)
 		profiles[player] = nil
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(EconomyConfig.autosaveInterval)
+			for player, profile in profiles do
+				if profile.unsaved then
+					task.spawn(save, player)
+				end
+			end
+		end
 	end)
 
 	game:BindToClose(function()

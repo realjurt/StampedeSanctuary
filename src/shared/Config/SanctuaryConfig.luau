@@ -13,4 +13,17 @@ return {
 	habitatSize = 30,
 	pathWidth = 8,
 	gateActivationDistance = 14,
+
+	-- Player plots (P1): one per player, three on each side of the shared hub, each facing it.
+	-- Offsets are plot centres relative to `origin`. Server size should be at most #plotOffsets.
+	plotOffsets = {
+		Vector3.new(-94, 0, -45),
+		Vector3.new(-94, 0, 0),
+		Vector3.new(-94, 0, 45),
+		Vector3.new(94, 0, -45),
+		Vector3.new(94, 0, 0),
+		Vector3.new(94, 0, 45),
+	},
+	plotSize = Vector2.new(45, 48), -- width (along the hub edge) × depth (away from the hub)
+	penSize = 20,
 }

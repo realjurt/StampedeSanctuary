@@ -82,12 +82,34 @@ local function spawnGhost(): Model
 	return ghost
 end
 
+-- Floating "YOUR PLOT" marker over this player's own plot sign (only this client sees it).
+local function markOwnPlot(sanctuary: Instance)
+	local plotId = player:GetAttribute("PlotId")
+	if typeof(plotId) ~= "number" then
+		UiKit.toast("All plots are taken in this server", 5)
+		return
+	end
+	local plot = sanctuary:WaitForChild("Plots"):WaitForChild(`Plot{plotId}`)
+	local board = plot:WaitForChild("OwnerSign") :: BasePart
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "MyPlotMarker"
+	billboard.Size = UDim2.fromOffset(180, 90)
+	billboard.StudsOffset = Vector3.new(0, 7, 0)
+	billboard.LightInfluence = 0
+	billboard.Adornee = board
+	billboard.Parent = player:WaitForChild("PlayerGui")
+	local text = UiKit.label(billboard, "Text", "YOUR PLOT\n▼", 30)
+	text.Size = UDim2.fromScale(1, 1)
+	text.TextColor3 = UiKit.PALETTE.green.top
+end
+
 function SanctuaryView.start()
 	while player:GetAttribute("DataLoaded") ~= true do
 		player:GetAttributeChangedSignal("DataLoaded"):Wait()
 	end
 
 	local sanctuary = Workspace:WaitForChild("Sanctuary")
+	task.spawn(markOwnPlot, sanctuary)
 	local signPart = sanctuary:WaitForChild("HabitatSign")
 	local signText = signPart:WaitForChild("Sign"):WaitForChild("Text") :: TextLabel
 
