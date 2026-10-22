@@ -5,8 +5,8 @@
 | | |
 |---|---|
 | **Phase** | Open-world redesign (D-027) — R1 of R4 |
-| **Latest milestone** | R1 steering-response tuning (`d12f148`) after R1 playtest feedback |
-| **Current objective** | Your R1 re-playtest (giraffe + elephant steering) — don't start R2 until approved |
+| **Latest milestone** | R1 handling approved (`d12f148`); camera shake fixed (`8030a42`) |
+| **Current objective** | Your camera check → R1 approval — don't start R2 until approved |
 | **Next session starts at** | [[16 - Session Handoff]] |
 
 ## Blockers / open questions
@@ -15,7 +15,7 @@
 - [ ] Target audience not yet stated
 
 ## Next actions
-1. **You:** R1 re-playtest ([[16 - Session Handoff]] has steps) → R2 after approval; P5 on hold
+1. **You:** camera check ([[16 - Session Handoff]] has steps) → R1 approval → R2 after approval; P5 on hold
 2. **You:** two-real-client multiplayer test ([[13 - Playtesting#Outstanding multiplayer test]]) — step 8 (other riders' mounts) expected to fail (D-016 gap)
 3. Fix only confirmed multiplayer problems
 3. Set server size to 6 in Game Settings (6 plots)

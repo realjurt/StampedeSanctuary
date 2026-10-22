@@ -25,7 +25,8 @@ Changes to try:
 Tester: realjurt · Device: desktop (Studio) · **Verdict: not approved — handling adjustment first**
 What needs work: giraffe and elephant feel noticeably delayed when steering, which makes them frustrating to control. Zebra is close to what's wanted.
 Direction (confirmed): every animal must react noticeably and promptly to a direction press. Keep species personality through acceleration, turning radius, top speed, jump height, body movement and momentum — **not** through input lag. Giraffe = smooth and graceful, not delayed; elephant = heavy and powerful, not hard to control. Responsive, satisfying controls over realism.
-Changes made: tuning pass `d12f148` (see [[12 - Development Log]]). Awaiting re-test.
+Changes made: tuning pass `d12f148` (see [[12 - Development Log]]).
+Re-test (same day): **handling approved for these animals.** New issue: camera felt shaky → fixed in `8030a42` ([[15 - Bug Tracker#BUG-004 Free-ride camera shake|BUG-004]]); awaiting your camera check.
 
 ### 2026-10-21 — R0: directional riding prototype (commit `0216979`)
 Tester: realjurt · Device: desktop (Studio) · **Verdict: approved → R1**

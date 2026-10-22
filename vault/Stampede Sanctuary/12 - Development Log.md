@@ -2,6 +2,12 @@
 
 Back to [[00 - Project Dashboard]] · Newest first. One short entry per significant session.
 
+## 2026-10-22 — Camera shake fix
+- You: steering now good for these animals; camera feels shaky.
+- Cause + fix in [[15 - Bug Tracker#BUG-004 Free-ride camera shake|BUG-004]] (commit `8030a42`): ride step moved from PreSimulation to a render step before the camera; camera aims at the motion path with eased height. Lesson [[Lessons Learned#L-010 Step script-driven movement per rendered frame, not in PreSimulation|L-010]].
+- Verified in Studio: zebra gallop speed wobble ±15.7 → ±0.5 studs/s, camera aim wobble 0.58° → 0.08°/frame, no vertical jolt; elephant crates/bushes pushed on the server; jump + landing fine. Only the known asset warning.
+- Not verified: your feel, mobile, gamepad.
+
 ## 2026-10-22 — R1 feedback → steering response tuning
 - R1 playtest: giraffe + elephant steering felt delayed; zebra fine — [[13 - Playtesting]].
 - Cause: `turnAcceleration` (how fast a turn builds and dies away) was 500 giraffe / 160 elephant vs 1400 zebra, plus low turn rates and acceleration. Camera checked: starts turning the same frame as the animal and settles ~0.3 s behind it, ~70 ms position smoothing — not a source of delay; unchanged.

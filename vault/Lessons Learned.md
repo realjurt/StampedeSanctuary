@@ -11,6 +11,12 @@ Format: goal · what went wrong · cause · fix · prevention · workflow change
 - **Workflow change:** Yes — import checklist in [[07 - Art Direction]].
 - **Evidence:** Your report (2026-10-20). Not independently reproduced.
 
+## L-010 Step script-driven movement per rendered frame, not in PreSimulation
+- **Problem:** Free-ride camera felt shaky ([[15 - Bug Tracker#BUG-004 Free-ride camera shake]]). Motion stepped in `RunService.PreSimulation`, which runs in fixed 1/240 s physics slices, so the animal advanced 3, 4 or 5 slices per rendered frame — uneven on screen, and the chase camera inherited it.
+- **Prevention:** Anything that moves a visible object by script for the local player (mounts, chase cameras) steps in `BindToRenderStep` just before the camera, using the render dt. Aim cameras at the smooth motion state, not at a posed/animated part. Measure with a per-frame log (step size ÷ dt) rather than eyeballing.
+- **Note:** The straight-safari `RideController` still steps in PreSimulation — same risk if it's ever reused.
+- **Evidence:** 2026-10-22, zebra gallop speed wobble ±15.7 → ±0.5 studs/s, camera aim wobble 0.58° → 0.08°/frame.
+
 ## L-009 Seated humanoids still report move input; camera mode can't be scripted
 - **Finding:** With `Humanoid.Sit = true` (rider welded to a mount), `Humanoid.MoveDirection` keeps updating, camera-relative, from keyboard/thumbstick/gamepad — usable for custom mount steering. `Player.DevComputerCameraMode` (e.g. Follow) can't be set from scripts at runtime.
 - **Use:** Read MoveDirection for vehicles/mounts instead of custom input; build a scripted chase camera when follow behaviour is needed. For automated tests, drive `Humanoid:Move()` from a RenderStep bound after `Input` priority.
