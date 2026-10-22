@@ -19,3 +19,8 @@ sourcemap.json
 Thumbs.db
 .DS_Store
 .vscode/settings.json
+
+# Obsidian per-device UI state (changes on every click)
+vault/.obsidian/workspace*.json
+vault/.obsidian/cache
+vault/.trash/
