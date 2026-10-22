@@ -8,6 +8,7 @@ local DevCommands = require(script.Parent.DevCommands)
 local IncomeService = require(script.Parent.IncomeService)
 local MachineService = require(script.Parent.MachineService)
 local OnboardingService = require(script.Parent.OnboardingService)
+local OpenWorldBuilder = require(script.Parent.OpenWorldBuilder)
 local PenService = require(script.Parent.PenService)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local PlotService = require(script.Parent.PlotService)
@@ -21,6 +22,7 @@ for courseId in CourseConfig.courses do
 	CourseBuilder.build(courseId)
 end
 local sanctuary = SanctuaryBuilder.build()
+OpenWorldBuilder.build()
 
 PlayerDataService.start()
 PlotService.start(sanctuary.plots)

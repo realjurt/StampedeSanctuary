@@ -2,6 +2,7 @@
 -- One animal on a course: model + course-space state (distance, x, speed, sideways velocity, jump)
 -- and its procedural pose. Driven either by the player (RideController) or by a herd brain
 -- (HerdController); switching control later doesn't change this module (D-016).
+-- Open world (D-027): `newAt` + `poseFree` place the same model in world space (FreeRide).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -36,10 +37,9 @@ end
 
 -- anchored = true for herd animals (moved purely by CFrame); false for a ridden mount, so the
 -- welded rider's character keeps simulating and replicating.
-function AnimalAgent.new(species: string, course: CourseConfig.Course, distance: number, x: number, anchored: boolean)
+local function create(species: string, ground: CFrame, course: CourseConfig.Course?, distance: number, x: number, anchored: boolean)
 	local stats = AnimalConfig[species]
 	assert(stats, `AnimalAgent: unknown species "{species}"`)
-	local ground = CFrame.new(course.origin.X + x, CourseConfig.groundY, course.origin.Z - distance)
 	local model = AnimalBuilder.build(species, ground, true)
 	model.Parent = getFolder()
 
@@ -69,6 +69,16 @@ function AnimalAgent.new(species: string, course: CourseConfig.Course, distance:
 		AnimalAgent.setRidden(self :: any, true)
 	end
 	return self
+end
+
+function AnimalAgent.new(species: string, course: CourseConfig.Course, distance: number, x: number, anchored: boolean)
+	local ground = CFrame.new(course.origin.X + x, CourseConfig.groundY, course.origin.Z - distance)
+	return create(species, ground, course, distance, x, anchored)
+end
+
+-- World-space animal (open world, D-027): no course; place it with `poseFree`.
+function AnimalAgent.newAt(species: string, ground: CFrame, anchored: boolean)
+	return create(species, ground, nil, 0, 0, anchored)
 end
 
 export type AnimalAgent = typeof(AnimalAgent.new("Zebra", nil :: any, 0, 0, true))
@@ -106,14 +116,9 @@ function AnimalAgent.updateJump(self: AnimalAgent, dt: number): boolean
 	return false
 end
 
--- Places the model from course-space state. The gait phase comes from distance travelled,
--- so hooves keep pace with the ground instead of sliding.
-function AnimalAgent.pose(self: AnimalAgent, extraYaw: number)
+-- Swings the legs for a gait phase and returns the body bob and pitch for it.
+local function gait(self: AnimalAgent, phase: number, speedFraction: number, airborne: boolean): (number, number)
 	local stats = self.stats
-	local speedFraction = math.clamp(self.speed / stats.cruiseSpeed, 0, 1.2)
-	local phase = self.distance / stats.strideLength * 2 * math.pi
-	local airborne = self.jumpTime ~= nil
-
 	for _, leg in self.legs do
 		local angle
 		if airborne then
@@ -123,19 +128,63 @@ function AnimalAgent.pose(self: AnimalAgent, extraYaw: number)
 		end
 		leg.weld.C0 = leg.baseC0 * CFrame.Angles(angle, 0, 0)
 	end
-
 	local bob = if airborne then 0 else (math.sin(phase) * 0.5 + 0.5) * stats.bobHeight * math.min(speedFraction, 1)
 	local pitch = if airborne then 0.12 else math.sin(phase + math.pi / 2) * stats.pitchAmplitude * math.min(speedFraction, 1)
+	return bob, pitch
+end
+
+-- Places the model from course-space state. The gait phase comes from distance travelled,
+-- so hooves keep pace with the ground instead of sliding.
+function AnimalAgent.pose(self: AnimalAgent, extraYaw: number)
+	local stats = self.stats
+	local speedFraction = math.clamp(self.speed / stats.cruiseSpeed, 0, 1.2)
+	local phase = self.distance / stats.strideLength * 2 * math.pi
+	local airborne = self.jumpTime ~= nil
+	local bob, pitch = gait(self, phase, speedFraction, airborne)
 	local yaw = -math.atan2(self.steerVelocity, math.max(self.speed, 10)) * stats.turnYaw + extraYaw
 	local roll = -self.steerVelocity * stats.turnLean
 
-	local origin = self.course.origin
+	local origin = (self.course :: CourseConfig.Course).origin
 	local position = Vector3.new(origin.X + self.x, CourseConfig.groundY + self.rootHeight + self:jumpHeight() + bob, origin.Z - self.distance)
 	self.root.CFrame = CFrame.new(position) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, roll)
 	if not self.anchored then
 		self.root.AssemblyLinearVelocity = Vector3.new(self.steerVelocity, 0, -self.speed)
 		self.root.AssemblyAngularVelocity = Vector3.zero
 	end
+end
+
+-- World-space pose (open world). `ground` = point under the animal, `heading` = yaw (0 faces -Z),
+-- `travelled` = distance moved (drives the gait), `height` = jump height above ground, `slope` =
+-- terrain pitch, `lean` = turn roll. `velocity` is applied when ridden so the rider replicates smoothly.
+function AnimalAgent.poseFree(self: AnimalAgent, ground: Vector3, heading: number, speed: number, travelled: number, height: number, slope: number, lean: number, velocity: Vector3)
+	local stats = self.stats
+	local speedFraction = math.clamp(speed / stats.cruiseSpeed, 0, 1.2)
+	local airborne = height > 0.05
+	local bob, pitch = gait(self, travelled / stats.strideLength * 2 * math.pi, speedFraction, airborne)
+	local position = ground + Vector3.new(0, self.rootHeight + height + bob, 0)
+	self.root.CFrame = CFrame.new(position) * CFrame.Angles(0, heading, 0) * CFrame.Angles(pitch + slope, 0, lean)
+	if not self.anchored then
+		self.root.AssemblyLinearVelocity = velocity
+		self.root.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
+-- Welds a rider's character onto the saddle (seated pose). The mount exists only on this client;
+-- the character is client-owned, so its movement still replicates to the server and others (D-016).
+function AnimalAgent.attachRider(self: AnimalAgent, humanoid: Humanoid): WeldConstraint?
+	local character = humanoid.Parent
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not rootPart then
+		return nil
+	end
+	humanoid.Sit = true
+	rootPart.CFrame = self.root.CFrame * CFrame.new(0, self.riderOffset, 0.2)
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "RiderWeld"
+	weld.Part0 = self.root
+	weld.Part1 = rootPart
+	weld.Parent = self.root
+	return weld
 end
 
 function AnimalAgent.destroy(self: AnimalAgent)

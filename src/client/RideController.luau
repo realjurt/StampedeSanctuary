@@ -120,23 +120,6 @@ local function riderRootPart(humanoid: Humanoid): BasePart?
 	return character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
 end
 
--- Welds the rider's character onto the mount's saddle. The mount exists only on this client; the
--- character is client-owned, so its movement still replicates to the server and others (D-016).
-local function attachRider(agent: AnimalAgent.AnimalAgent, humanoid: Humanoid): WeldConstraint?
-	local rootPart = riderRootPart(humanoid)
-	if not rootPart then
-		return nil
-	end
-	humanoid.Sit = true
-	rootPart.CFrame = agent.root.CFrame * CFrame.new(0, agent.riderOffset, 0.2)
-	local weld = Instance.new("WeldConstraint")
-	weld.Name = "RiderWeld"
-	weld.Part0 = agent.root
-	weld.Part1 = rootPart
-	weld.Parent = agent.root
-	return weld
-end
-
 function RideController.new(courseId: string, humanoid: Humanoid)
 	local course = CourseConfig.courses[courseId] or CourseConfig.courses[CourseConfig.defaultCourse]
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -249,7 +232,7 @@ function RideController.setMount(self: RideController, agent: AnimalAgent.Animal
 	-- Grip (formerly temper): seconds before being bucked off, scaled by stamina (TamingConfig).
 	self.gripSeconds = TamingConfig.gripSeconds(agent.stats.temperDuration, playerStamina())
 	self.dust = makeDust(agent.root, agent.rootHeight)
-	self.riderWeld = attachRider(agent, self.humanoid)
+	self.riderWeld = agent:attachRider(self.humanoid)
 	self.hud:setAnimal(agent.species, agent.stats)
 	local requirement = agent.model:FindFirstChild("StaminaLabel")
 	if requirement then

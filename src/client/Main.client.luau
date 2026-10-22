@@ -5,6 +5,7 @@
 local Players = game:GetService("Players")
 
 local CurrencyHud = require(script.Parent.CurrencyHud)
+local FreeRide = require(script.Parent.FreeRide)
 local HerdController = require(script.Parent.HerdController)
 local LeapTutorial = require(script.Parent.LeapTutorial)
 local MenuController = require(script.Parent.MenuController)
@@ -100,3 +101,4 @@ task.spawn(OnboardingController.start)
 task.spawn(SanctuaryView.start)
 task.spawn(PenView.start)
 task.spawn(TrainingView.start)
+task.spawn(FreeRide.start)
