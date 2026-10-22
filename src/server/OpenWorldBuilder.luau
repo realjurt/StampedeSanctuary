@@ -1,7 +1,8 @@
 --!strict
 -- Open-world test field (D-027, R0): a small flat-ish area north of the sanctuary for directional
 -- riding — gentle hills and ramps (ground following), small ledges (step up), logs (jump), rocks
--- and trees (blocking). Placeholder parts only; replaced by the R2 savannah.
+-- and trees (blocking), and crates / bushes only the elephant can shove aside (R1, "Pushables").
+-- Placeholder parts only; replaced by the R2 savannah.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -18,6 +19,8 @@ local COLORS = {
 	log = Color3.fromRGB(132, 90, 52),
 	ledge = Color3.fromRGB(196, 170, 110),
 	sign = Color3.fromRGB(250, 240, 210),
+	crate = Color3.fromRGB(196, 140, 80),
+	bush = Color3.fromRGB(96, 150, 64),
 }
 
 local OpenWorldBuilder = {}
@@ -96,6 +99,31 @@ function OpenWorldBuilder.build(): Folder
 			trunk.CanCollide = true
 		end
 		tree.Parent = folder
+	end
+
+	-- Pushables: unanchored, server-owned (PushableService moves them). A row across the path
+	-- straight ahead of the practice animals, and a cluster to plough through.
+	local pushables = Instance.new("Folder")
+	pushables.Name = "Pushables"
+	pushables.Parent = folder
+	-- Blocks, not balls: they tumble and stop instead of rolling away.
+	local function pushable(name: string, size: Vector3, position: Vector3, color: Color3)
+		local part = makePart(pushables, name, size, CFrame.new(position + Vector3.new(0, size.Y / 2, 0)), color)
+		part.Anchored = false
+		part.CustomPhysicalProperties = PhysicalProperties.new(0.4, 0.6, 0.1)
+		part:SetAttribute("Home", part.CFrame)
+		return part
+	end
+	for i = -2, 2 do
+		local spot = at(20 + i * 4, 60)
+		if i % 2 == 0 then
+			pushable("Crate", Vector3.new(3.5, 3.5, 3.5), spot, COLORS.crate)
+		else
+			pushable("Bush", Vector3.new(4, 3, 4), spot, COLORS.bush)
+		end
+	end
+	for _, spot in { { -40, 20 }, { -36, 24 }, { -44, 25 }, { -40, 29 }, { -35, 30 }, { -45, 32 } } do
+		pushable("Crate", Vector3.new(3, 3, 3), at(spot[1], spot[2]), COLORS.crate)
 	end
 
 	-- Sign at the entrance, facing the sanctuary.

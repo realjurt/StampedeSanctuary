@@ -1,16 +1,15 @@
 --!strict
--- Open-world riding prototype (D-027, R0). A practice zebra stands at the edge of the test field;
--- press its Ride prompt to mount, then ride freely in any direction:
+-- Open-world riding (D-027). Practice zebra, giraffe and elephant stand at the edge of the test
+-- field (R1); press one's Ride prompt to mount, then ride freely in any direction:
 --   • Steering comes from the standard Roblox move input (Humanoid.MoveDirection — WASD, touch
---     thumbstick, gamepad stick), camera-relative. The animal turns toward it at its own turn rate
---     with acceleration and momentum; pulling back brakes, then backs up slowly.
+--     thumbstick, gamepad stick), camera-relative. Each species' motion and handling live in
+--     FreeRideMotion / FreeRideConfig; this module owns input, camera, prompts and mounting.
 --   • Jump = the standard jump input (Space / touch jump button / gamepad A) → the animal jumps.
---   • Arcade movement, no physics: a downward ray keeps it on the ground (steps up small ledges,
---     falls off edges), a forward sphere cast stops it at rocks and trees and slides along them.
 --   • Chase camera behind the animal; drag it with right mouse / touch / right stick, and it eases
---     back behind after a moment. FOV widens with speed.
+--     back behind after a moment. FOV widens with speed; hard landings shake it a little.
 --   • The mount is a client-side AnimalAgent with the rider welded on, as in safari rides, so the
 --     character's movement replicates (multiplayer-compatible, D-016).
+--   • The elephant shoves "Pushables" aside; the server moves them (PushObstacle → PushableService).
 -- Get off: E / gamepad B / GET OFF button.
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -21,7 +20,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local FreeRideConfig = require(ReplicatedStorage.Shared.Config.FreeRideConfig)
-local AnimalAgent = require(script.Parent.AnimalAgent)
+local FreeRideMotion = require(script.Parent.FreeRideMotion)
 local UiKit = require(script.Parent.UiKit)
 
 local FreeRide = {}
@@ -30,41 +29,32 @@ local player = Players.LocalPlayer
 local CAMERA = FreeRideConfig.camera
 local CAMERA_STEP = "FreeRideCamera"
 local DISMOUNT_ACTION = "FreeRideDismount"
-local CAST_RADIUS = 1.2
-local BODY_HALF_LENGTH = 3
+
+local forwardOf = FreeRideMotion.forwardOf
+local wrapAngle = FreeRideMotion.wrapAngle
 
 type Ride = {
+	mount: FreeRideMotion.Mount,
 	humanoid: Humanoid,
 	weld: WeldConstraint?,
 	connections: { RBXScriptConnection },
 	gui: ScreenGui,
 }
 
-local agent: AnimalAgent.AnimalAgent? = nil
-local handling: FreeRideConfig.Handling = FreeRideConfig.handling.Zebra
-local prompt: ProximityPrompt? = nil
+local mounts: { FreeRideMotion.Mount } = {}
+local prompts: { [FreeRideMotion.Mount]: ProximityPrompt } = {}
 local ride: Ride? = nil
-local hintShown = false
-
--- Motion state (world space). `position` = feet; heading 0 faces -Z.
-local position = Vector3.zero
-local heading = 0
-local speed = 0
-local verticalSpeed = 0
-local grounded = true
-local travelled = 0
-local turnSpeed = 0
-local lean = 0
-local slope = 0
-local jumpRequested = false
+local hintsShown: { [string]: boolean } = {}
+local pushRemote: RemoteEvent? = nil
 
 -- Camera state
 local cameraYaw = 0
 local cameraPitch = 14
-local cameraDistance = CAMERA.distance
+local cameraZoom = 0 -- mouse-wheel offset from the species' distance
 local cameraPosition: Vector3? = nil
 local lastCameraInput = -math.huge
 local fov = CAMERA.baseFov
+local shake = 0
 local gamepadLook = Vector2.zero
 local touchLooks: { [InputObject]: Vector3 } = {}
 
@@ -82,168 +72,43 @@ local function refreshFilter()
 		table.insert(exclude, localAnimals)
 	end
 	params.FilterDescendantsInstances = exclude
+	FreeRideMotion.refreshFilter(exclude)
 end
 
-local function moveToward(current: number, target: number, maxDelta: number): number
-	if current < target then
-		return math.min(current + maxDelta, target)
+local function setPromptsEnabled(enabled: boolean)
+	for _, prompt in prompts do
+		prompt.Enabled = enabled
 	end
-	return math.max(current - maxDelta, target)
-end
-
-local function wrapAngle(angle: number): number
-	return (angle + math.pi) % (2 * math.pi) - math.pi
-end
-
-local function forwardOf(yaw: number): Vector3
-	return Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
-end
-
-local function groundAt(point: Vector3, above: number): number?
-	local result = Workspace:Raycast(point + Vector3.new(0, above, 0), Vector3.new(0, -(above + 60), 0), params)
-	return if result then result.Position.Y else nil
-end
-
--- ── Motion ────────────────────────────────────────────────────────────────────────────────────
-
-local function steer(dt: number, humanoid: Humanoid)
-	local move = humanoid.MoveDirection
-	local flat = Vector3.new(move.X, 0, move.Z)
-	local amount = math.min(flat.Magnitude, 1)
-	local speedFraction = math.clamp(math.abs(speed) / handling.topSpeed, 0, 1)
-	turnSpeed = 0
-	if amount < 0.1 then
-		speed = moveToward(speed, 0, handling.coastDeceleration * dt)
-		return
-	end
-	local direction = flat.Unit
-	if direction:Dot(forwardOf(cameraYaw)) < -0.9 then
-		-- Pulling straight back (toward the camera): brake, then back up slowly. Diagonally back
-		-- turns the animal round instead.
-		if speed > 1 then
-			speed = moveToward(speed, 0, handling.braking * dt)
-		else
-			speed = moveToward(speed, -handling.reverseSpeed * amount, handling.acceleration * dt)
-		end
-		return
-	end
-	local desired = math.atan2(-direction.X, -direction.Z)
-	local difference = wrapAngle(desired - heading)
-	local turnRate = math.rad(handling.turnRateSlow + (handling.turnRateFast - handling.turnRateSlow) * speedFraction)
-	local turn = math.clamp(difference, -turnRate * dt, turnRate * dt)
-	heading = wrapAngle(heading + turn)
-	turnSpeed = turn / dt
-	-- Sharp turns slow it down, so it swings round instead of drifting wide.
-	local target = handling.topSpeed * amount * math.max(math.cos(difference), 0.3)
-	speed = moveToward(speed, target, (if speed < target then handling.acceleration else handling.braking) * dt)
-end
-
-local function move(dt: number)
-	local forward = forwardOf(heading)
-	local delta = forward * speed * dt
-	if delta.Magnitude > 1e-4 then
-		-- Anything taller than a step (relative to the current jump height) blocks; slide along it.
-		local origin = position + Vector3.new(0, handling.stepHeight + CAST_RADIUS + 0.1, 0)
-		local direction = delta.Unit * (delta.Magnitude + BODY_HALF_LENGTH)
-		local hit = Workspace:Spherecast(origin, CAST_RADIUS, direction, params)
-		-- Walls, and anything whose surface is above step height (e.g. the rounded top of a log).
-		if hit and (hit.Normal.Y < 0.6 or hit.Position.Y - position.Y > handling.stepHeight) then
-			local normal = Vector3.new(hit.Normal.X, 0, hit.Normal.Z)
-			normal = if normal.Magnitude > 0.3 then normal.Unit else -delta.Unit
-			local into = delta:Dot(normal)
-			if into < 0 then
-				local before = delta.Magnitude
-				delta -= normal * into
-				speed *= if before > 1e-4 then delta.Magnitude / before else 0
-			end
-			-- Never step closer than the body length.
-			if hit.Distance < BODY_HALF_LENGTH * 0.6 then
-				delta += normal * (BODY_HALF_LENGTH * 0.6 - hit.Distance)
-			end
-		end
-	end
-	local groundY = groundAt(position + delta, handling.stepHeight + 0.5)
-	if not groundY and delta.Magnitude > 1e-4 then
-		-- The edge of the world: don't go where there is no ground at all.
-		delta = Vector3.zero
-		speed = 0
-		groundY = groundAt(position, handling.stepHeight + 0.5)
-	end
-	local nextPosition = position + delta
-
-	if grounded and jumpRequested then
-		verticalSpeed = math.sqrt(2 * handling.gravity * handling.jumpHeight)
-		grounded = false
-	end
-	jumpRequested = false
-
-	if grounded then
-		if groundY and groundY > nextPosition.Y + handling.stepHeight then
-			-- A ledge too tall to step onto that the cast missed: stay put.
-			nextPosition = position
-			speed = 0
-		elseif groundY and groundY >= nextPosition.Y - 1.5 then
-			nextPosition = Vector3.new(nextPosition.X, groundY, nextPosition.Z)
-			verticalSpeed = 0
-		else
-			grounded = false -- ran off an edge
-		end
-	end
-	if not grounded then
-		verticalSpeed -= handling.gravity * dt
-		nextPosition += Vector3.new(0, verticalSpeed * dt, 0)
-		-- Land only on ground within a step of the feet (never pop up onto something tall).
-		if groundY and nextPosition.Y <= groundY and groundY - nextPosition.Y <= handling.stepHeight then
-			nextPosition = Vector3.new(nextPosition.X, groundY, nextPosition.Z)
-			verticalSpeed = 0
-			grounded = true
-		end
-	end
-	travelled += delta.Magnitude
-	position = nextPosition
-end
-
-local function pose(dt: number)
-	local current = agent
-	if not current then
-		return
-	end
-	local forward = forwardOf(heading)
-	local groundY = groundAt(position, 1) or position.Y
-	local front = groundAt(position + forward * 2, handling.stepHeight)
-	local back = groundAt(position - forward * 2, handling.stepHeight)
-	local targetSlope = if grounded and front and back then math.atan((front - back) / 4) else 0
-	slope += (math.clamp(targetSlope, -0.5, 0.5) - slope) * math.min(dt * 10, 1)
-	local speedFraction = math.clamp(math.abs(speed) / handling.topSpeed, 0, 1)
-	lean += (math.clamp(-turnSpeed * speedFraction * 0.12, -0.22, 0.22) - lean) * math.min(dt * 8, 1)
-	local ground = Vector3.new(position.X, math.min(groundY, position.Y), position.Z)
-	current:poseFree(ground, heading, math.abs(speed), travelled, position.Y - ground.Y, slope, lean, forward * speed + Vector3.new(0, verticalSpeed, 0))
 end
 
 -- ── Camera ────────────────────────────────────────────────────────────────────────────────────
 
 local function updateCamera(dt: number)
-	local current = agent
+	local current = ride
 	local camera = Workspace.CurrentCamera
-	if not current or not ride then
+	if not current then
 		return
 	end
+	local mount = current.mount
+	local handling = mount.handling
 	camera.CameraType = Enum.CameraType.Scriptable
-	local speedFraction = math.clamp(math.abs(speed) / handling.topSpeed, 0, 1)
+	local speedFraction = math.clamp(math.abs(mount.speed) / handling.topSpeed, 0, 1)
 
 	if gamepadLook.Magnitude > 0.2 then
 		cameraYaw -= math.rad(gamepadLook.X * CAMERA.stickSensitivity * dt)
 		cameraPitch = math.clamp(cameraPitch - gamepadLook.Y * CAMERA.stickSensitivity * 0.5 * dt, CAMERA.minPitch, CAMERA.maxPitch)
 		lastCameraInput = os.clock()
 	end
-	if os.clock() - lastCameraInput > CAMERA.followDelay and math.abs(speed) > 2 then
+	if os.clock() - lastCameraInput > CAMERA.followDelay and math.abs(mount.speed) > 2 then
 		local rate = CAMERA.followRate * (0.3 + speedFraction)
-		cameraYaw = wrapAngle(cameraYaw + wrapAngle(heading - cameraYaw) * math.min(rate * dt, 1))
+		cameraYaw = wrapAngle(cameraYaw + wrapAngle(mount.heading - cameraYaw) * math.min(rate * dt, 1))
 	end
 
-	local focus = current.root.Position + Vector3.new(0, 3, 0) + forwardOf(heading) * CAMERA.lookAhead * speedFraction
+	local root = mount.agent.root.Position
+	local focus = root + Vector3.new(0, 3 + handling.cameraHeight, 0) + forwardOf(mount.heading) * CAMERA.lookAhead * speedFraction
 	local rotation = CFrame.Angles(0, cameraYaw, 0) * CFrame.Angles(-math.rad(cameraPitch), 0, 0)
-	local desired = focus + rotation:VectorToWorldSpace(Vector3.new(0, CAMERA.height * 0.3, cameraDistance))
+	local distance = math.clamp(handling.cameraDistance + cameraZoom, 10, 34)
+	local desired = focus + rotation:VectorToWorldSpace(Vector3.new(0, CAMERA.height * 0.3, distance))
 	-- Keep the camera out of hills and trees.
 	local blocked = Workspace:Raycast(focus, desired - focus, params)
 	if blocked then
@@ -254,7 +119,11 @@ local function updateCamera(dt: number)
 	cameraPosition = smoothed
 	fov += (CAMERA.baseFov + CAMERA.speedFov * speedFraction - fov) * math.min(dt * 4, 1)
 	camera.FieldOfView = fov
-	camera.CFrame = CFrame.lookAt(smoothed, focus)
+	-- Landing shake: a quick decaying jitter, applied after smoothing so it stays crisp.
+	shake *= math.exp(-dt * 12)
+	local t = os.clock() * 40
+	local jitter = Vector3.new(math.sin(t * 1.3), math.sin(t), math.sin(t * 0.7)) * shake
+	camera.CFrame = CFrame.lookAt(smoothed + jitter, focus)
 end
 
 local function onInputChanged(input: InputObject, processed: boolean)
@@ -266,7 +135,7 @@ local function onInputChanged(input: InputObject, processed: boolean)
 		cameraPitch = math.clamp(cameraPitch + input.Delta.Y * CAMERA.dragSensitivity, CAMERA.minPitch, CAMERA.maxPitch)
 		lastCameraInput = os.clock()
 	elseif input.UserInputType == Enum.UserInputType.MouseWheel then
-		cameraDistance = math.clamp(cameraDistance - input.Position.Z * 2, 10, 32)
+		cameraZoom = math.clamp(cameraZoom - input.Position.Z * 2, -8, 14)
 	elseif input.UserInputType == Enum.UserInputType.Touch and touchLooks[input] then
 		local delta = input.Position - touchLooks[input]
 		touchLooks[input] = input.Position
@@ -297,9 +166,36 @@ local function onInputEnded(input: InputObject)
 	end
 end
 
--- ── Mount / dismount ──────────────────────────────────────────────────────────────────────────
+-- ── Per-frame update ──────────────────────────────────────────────────────────────────────────
 
 local dismount: () -> ()
+
+local function onStep(dt: number)
+	local current = ride
+	for _, animal in mounts do
+		if current and current.mount == animal then
+			animal:steer(dt, current.humanoid.MoveDirection, cameraYaw)
+			local result = animal:move(dt)
+			if result.landed then
+				shake = math.max(shake, result.landed * animal.handling.landingShake)
+			end
+			local remote = pushRemote
+			if remote then
+				for _, part in result.pushed do
+					remote:FireServer(part, forwardOf(animal.heading))
+				end
+			end
+		end
+		animal:pose(dt) -- a standing animal just breathes
+	end
+	if current and current.mount.position.Y < -60 then
+		local fallen = current.mount
+		dismount() -- fell off the world
+		fallen:reset()
+	end
+end
+
+-- ── Mount / dismount ──────────────────────────────────────────────────────────────────────────
 
 local function buildGui(): ScreenGui
 	local gui = UiKit.screen("FreeRideHud", 4)
@@ -314,45 +210,32 @@ local function buildGui(): ScreenGui
 	return gui
 end
 
-local function mount()
-	local current = agent
+local function mount(target: FreeRideMotion.Mount)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if ride or not current or not humanoid or humanoid.Health <= 0 or player:GetAttribute("InSafari") == true then
+	if ride or not humanoid or humanoid.Health <= 0 or player:GetAttribute("InSafari") == true then
 		return
 	end
 	refreshFilter()
-	current:setRidden(true)
+	local agent = target.agent
+	agent:setRidden(true)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-	local weld = current:attachRider(humanoid)
+	local weld = agent:attachRider(humanoid)
 	local connections: { RBXScriptConnection } = {}
-	ride = { humanoid = humanoid, weld = weld, connections = connections, gui = buildGui() }
+	ride = { mount = target, humanoid = humanoid, weld = weld, connections = connections, gui = buildGui() }
 
-	speed, verticalSpeed, grounded, turnSpeed = 0, 0, true, 0
-	cameraYaw, cameraPitch, cameraPosition, lastCameraInput = heading, 14, nil, -math.huge
+	target:settle()
+	cameraYaw, cameraPitch, cameraPosition, lastCameraInput, shake = target.heading, 14, nil, -math.huge, 0
 	fov = Workspace.CurrentCamera.FieldOfView
-	if prompt then
-		prompt.Enabled = false
-	end
+	setPromptsEnabled(false)
 
 	table.insert(connections, humanoid:GetPropertyChangedSignal("Jump"):Connect(function()
 		if humanoid.Jump then
 			humanoid.Jump = false
-			jumpRequested = true
+			target:requestJump()
 		end
 	end))
 	table.insert(connections, humanoid.Died:Connect(dismount))
-	table.insert(connections, RunService.PreSimulation:Connect(function(dt)
-		if not ride then
-			return
-		end
-		steer(dt, humanoid)
-		move(dt)
-		pose(dt)
-		if position.Y < -60 then
-			dismount() -- fell off the world
-		end
-	end))
 	RunService:BindToRenderStep(CAMERA_STEP, Enum.RenderPriority.Camera.Value + 1, updateCamera)
 	ContextActionService:BindActionAtPriority(DISMOUNT_ACTION, function(_, state)
 		if state == Enum.UserInputState.Begin then
@@ -361,12 +244,14 @@ local function mount()
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.E, Enum.KeyCode.ButtonB)
 
-	if not hintShown then
-		hintShown = true
+	if not hintsShown[target.species] then
+		local first = next(hintsShown) == nil
+		hintsShown[target.species] = true
 		local touch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-		UiKit.toast(if touch
+		local controls = if touch
 			then "Thumbstick to ride · JUMP to jump · drag to look around"
-			else "WASD to ride · Space to jump · right-drag to look · E to get off", 6)
+			else "WASD to ride · Space to jump · right-drag to look · E to get off"
+		UiKit.toast(if first then `{target.handling.hint}\n{controls}` else target.handling.hint, 6)
 	end
 end
 
@@ -394,56 +279,43 @@ dismount = function()
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 	local character = humanoid.Parent
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local animal = agent
-	if animal then
-		animal:setRidden(false)
-		speed, verticalSpeed, turnSpeed, lean = 0, 0, 0, 0
-		if not grounded then
-			position = Vector3.new(position.X, groundAt(position, 1) or position.Y, position.Z)
-			grounded = true
-		end
-		pose(1)
-		if rootPart and humanoid.Health > 0 then
-			-- Step off to the animal's right side.
-			local side = CFrame.Angles(0, heading, 0):VectorToWorldSpace(Vector3.new(4, 0, 0))
-			rootPart.CFrame = CFrame.new(position + side + Vector3.new(0, 3, 0)) * CFrame.Angles(0, heading, 0)
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-		end
+	local animal = current.mount
+	animal.agent:setRidden(false)
+	animal:settle()
+	if rootPart and humanoid.Health > 0 then
+		-- Step off to the animal's right side, clear of its body.
+		local side = CFrame.Angles(0, animal.heading, 0):VectorToWorldSpace(Vector3.new(animal.halfWidth + 2.5, 0, 0))
+		rootPart.CFrame = CFrame.new(animal.position + side + Vector3.new(0, 3, 0)) * CFrame.Angles(0, animal.heading, 0)
+		rootPart.AssemblyLinearVelocity = Vector3.zero
 	end
 	local camera = Workspace.CurrentCamera
 	camera.CameraType = Enum.CameraType.Custom
 	camera.CameraSubject = humanoid
 	camera.FieldOfView = CAMERA.baseFov
-	if prompt then
-		prompt.Enabled = player:GetAttribute("InSafari") ~= true
-	end
+	setPromptsEnabled(player:GetAttribute("InSafari") ~= true)
 end
 
--- ── Practice zebra ────────────────────────────────────────────────────────────────────────────
+-- ── Practice animals ──────────────────────────────────────────────────────────────────────────
 
-local function spawnPracticeZebra()
-	local spawn = FreeRideConfig.field.practiceSpawn
-	refreshFilter()
-	local animal = AnimalAgent.newAt("Zebra", spawn, true)
-	animal.model.Name = "PracticeZebra"
-	agent = animal
-	position = spawn.Position
-	heading = 0
-	position = Vector3.new(position.X, groundAt(position, 5) or position.Y, position.Z)
-	pose(1)
+local function spawnPracticeAnimal(species: string, home: CFrame)
+	local animal = FreeRideMotion.new(species, home)
+	animal.agent.model.Name = "Practice" .. species
+	table.insert(mounts, animal)
 
 	local ridePrompt = Instance.new("ProximityPrompt")
 	ridePrompt.Name = "RidePrompt"
 	ridePrompt.ActionText = "Ride"
-	ridePrompt.ObjectText = "Practice Zebra"
+	ridePrompt.ObjectText = "Practice " .. species
 	ridePrompt.KeyboardKeyCode = Enum.KeyCode.E
 	ridePrompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	ridePrompt.HoldDuration = 0
 	ridePrompt.MaxActivationDistance = 10
 	ridePrompt.RequiresLineOfSight = false
-	ridePrompt.Parent = animal.root
-	ridePrompt.Triggered:Connect(mount)
-	prompt = ridePrompt
+	ridePrompt.Parent = animal.agent.root
+	ridePrompt.Triggered:Connect(function()
+		mount(animal)
+	end)
+	prompts[animal] = ridePrompt
 end
 
 function FreeRide.isRiding(): boolean
@@ -452,7 +324,13 @@ end
 
 function FreeRide.start()
 	Workspace:WaitForChild("OpenWorld")
-	spawnPracticeZebra()
+	pushRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PushObstacle") :: RemoteEvent
+	refreshFilter()
+	for _, entry in FreeRideConfig.field.practiceAnimals do
+		spawnPracticeAnimal(entry.species, entry.spawn)
+	end
+	refreshFilter() -- LocalAnimals exists now
+	RunService.PreSimulation:Connect(onStep)
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputChanged:Connect(onInputChanged)
 	UserInputService.InputEnded:Connect(onInputEnded)
@@ -461,9 +339,7 @@ function FreeRide.start()
 		if inSafari then
 			dismount()
 		end
-		if prompt then
-			prompt.Enabled = not inSafari and not ride
-		end
+		setPromptsEnabled(not inSafari and not ride)
 	end)
 	player.CharacterRemoving:Connect(function()
 		dismount()

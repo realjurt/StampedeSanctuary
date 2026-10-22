@@ -2,7 +2,8 @@
 -- One animal on a course: model + course-space state (distance, x, speed, sideways velocity, jump)
 -- and its procedural pose. Driven either by the player (RideController) or by a herd brain
 -- (HerdController); switching control later doesn't change this module (D-016).
--- Open world (D-027): `newAt` + `poseFree` place the same model in world space (FreeRide).
+-- Open world (D-027): `newAt` + `poseFree` place the same model in world space; the free-ride
+-- motion (FreeRideMotion) computes the body pose and leg angles itself.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -11,7 +12,7 @@ local AnimalBuilder = require(ReplicatedStorage.Shared.Animals.AnimalBuilder)
 local AnimalConfig = require(ReplicatedStorage.Shared.Config.AnimalConfig)
 local CourseConfig = require(ReplicatedStorage.Shared.Config.CourseConfig)
 
-type Leg = { weld: Weld, baseC0: CFrame, phaseOffset: number, isFront: boolean }
+type Leg = { key: string, weld: Weld, baseC0: CFrame, phaseOffset: number, isFront: boolean }
 
 local AnimalAgent = {}
 AnimalAgent.__index = AnimalAgent
@@ -62,7 +63,7 @@ local function create(species: string, ground: CFrame, course: CourseConfig.Cour
 		local phase = LEG_PHASES[child.Name]
 		local weld = child:FindFirstChild("Hip")
 		if phase and weld and weld:IsA("Weld") then
-			table.insert(self.legs, { weld = weld, baseC0 = weld.C0, phaseOffset = phase.offset, isFront = phase.front })
+			table.insert(self.legs, { key = string.sub(child.Name, 4), weld = weld, baseC0 = weld.C0, phaseOffset = phase.offset, isFront = phase.front })
 		end
 	end
 	if not anchored then
@@ -153,16 +154,13 @@ function AnimalAgent.pose(self: AnimalAgent, extraYaw: number)
 	end
 end
 
--- World-space pose (open world). `ground` = point under the animal, `heading` = yaw (0 faces -Z),
--- `travelled` = distance moved (drives the gait), `height` = jump height above ground, `slope` =
--- terrain pitch, `lean` = turn roll. `velocity` is applied when ridden so the rider replicates smoothly.
-function AnimalAgent.poseFree(self: AnimalAgent, ground: Vector3, heading: number, speed: number, travelled: number, height: number, slope: number, lean: number, velocity: Vector3)
-	local stats = self.stats
-	local speedFraction = math.clamp(speed / stats.cruiseSpeed, 0, 1.2)
-	local airborne = height > 0.05
-	local bob, pitch = gait(self, travelled / stats.strideLength * 2 * math.pi, speedFraction, airborne)
-	local position = ground + Vector3.new(0, self.rootHeight + height + bob, 0)
-	self.root.CFrame = CFrame.new(position) * CFrame.Angles(0, heading, 0) * CFrame.Angles(pitch + slope, 0, lean)
+-- World-space pose (open world). `rootCFrame` = the body's CFrame; `legAngles` = swing per leg
+-- (keys FL, FR, BL, BR). `velocity` is applied when ridden so the rider replicates smoothly.
+function AnimalAgent.poseFree(self: AnimalAgent, rootCFrame: CFrame, legAngles: { [string]: number }, velocity: Vector3)
+	for _, leg in self.legs do
+		leg.weld.C0 = leg.baseC0 * CFrame.Angles(legAngles[leg.key] or 0, 0, 0)
+	end
+	self.root.CFrame = rootCFrame
 	if not self.anchored then
 		self.root.AssemblyLinearVelocity = velocity
 		self.root.AssemblyAngularVelocity = Vector3.zero
