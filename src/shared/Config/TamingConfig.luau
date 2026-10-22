@@ -8,13 +8,18 @@ local TamingConfig = {}
 TamingConfig.carryCapacity = 7
 
 -- Grip = how long you can stay on before being bucked off (formerly "temper").
--- Grip seconds = species base × scale, where scale = gripBaseScale + stamina × gripPerStamina,
--- clamped to [gripMinScale, gripMaxScale]. Starting stamina 20 → ×1.0 (today's feel); the cap is
--- reached at stamina 40 (×1.5), so training beyond that unlocks animals but doesn't trivialize grip.
-TamingConfig.gripBaseScale = 0.5
-TamingConfig.gripPerStamina = 0.025
-TamingConfig.gripMinScale = 0.5
-TamingConfig.gripMaxScale = 1.5
+-- Grip seconds = species base × gripScale(stamina). The scale is read off `gripCurve`, a list of
+-- { stamina, scale } points joined by straight lines (approved P4 targets, D-026): diminishing
+-- returns after 40, capped at the last point. Stamina itself keeps growing past 100 and is saved.
+-- Edit the points to rebalance; keep them sorted by stamina.
+TamingConfig.gripCurve = {
+	{ 0, 0.5 },
+	{ 20, 1.0 }, -- starting stamina: unchanged feel
+	{ 40, 1.5 },
+	{ 60, 1.7 },
+	{ 80, 1.85 },
+	{ 100, 2.0 }, -- cap
+} :: { { number } }
 
 -- Tame bar shows "almost tamed" from this fraction.
 TamingConfig.almostTamedAt = 0.75
@@ -23,13 +28,22 @@ TamingConfig.almostTamedAt = 0.75
 -- switch (network timing). The client also spends the leap arc (~0.45 s) before taming starts.
 TamingConfig.tameTimeTolerance = 0.25
 
+function TamingConfig.gripScale(stamina: number): number
+	local curve = TamingConfig.gripCurve
+	if stamina <= curve[1][1] then
+		return curve[1][2]
+	end
+	for i = 2, #curve do
+		local low, high = curve[i - 1], curve[i]
+		if stamina <= high[1] then
+			return low[2] + (high[2] - low[2]) * (stamina - low[1]) / (high[1] - low[1])
+		end
+	end
+	return curve[#curve][2]
+end
+
 function TamingConfig.gripSeconds(baseSeconds: number, stamina: number): number
-	local scale = math.clamp(
-		TamingConfig.gripBaseScale + stamina * TamingConfig.gripPerStamina,
-		TamingConfig.gripMinScale,
-		TamingConfig.gripMaxScale
-	)
-	return baseSeconds * scale
+	return baseSeconds * TamingConfig.gripScale(stamina)
 end
 
 return TamingConfig

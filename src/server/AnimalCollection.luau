@@ -56,6 +56,12 @@ function AnimalCollection.incomeOf(species: string): number
 	return EconomyConfig.incomePerSecond[species] or 0
 end
 
+-- Pen slots at a pen level (P4); unknown levels fall back to the nearest valid one.
+function AnimalCollection.penCapacity(penLevel: number): number
+	local levels = EconomyConfig.penLevels
+	return levels[math.clamp(math.floor(penLevel), 1, #levels)].capacity
+end
+
 -- Coins per second from pen animals only (D-024: carried animals never earn).
 function AnimalCollection.penIncome(owner: Owner): number
 	local total = 0

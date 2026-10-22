@@ -12,6 +12,7 @@ local OnboardingController = require(script.Parent.OnboardingController)
 local PenView = require(script.Parent.PenView)
 local RideController = require(script.Parent.RideController)
 local SanctuaryView = require(script.Parent.SanctuaryView)
+local TrainingView = require(script.Parent.TrainingView)
 local TutorialDirector = require(script.Parent.TutorialDirector)
 
 local player = Players.LocalPlayer
@@ -98,3 +99,4 @@ task.spawn(CurrencyHud.start)
 task.spawn(OnboardingController.start)
 task.spawn(SanctuaryView.start)
 task.spawn(PenView.start)
+task.spawn(TrainingView.start)

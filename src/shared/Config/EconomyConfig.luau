@@ -18,8 +18,19 @@ return {
 		Giraffe = 2,
 		Elephant = 5,
 	} :: { [string]: number },
-	penCapacity = 8,
 	incomeInterval = 1, -- seconds between income ticks
 	depositRevealInterval = 0.6, -- seconds between deposited animals appearing in the pen
-	depositRange = 22, -- max studs from the pen centre the server accepts a deposit from
+	depositRange = 16, -- max studs from the DEPOSIT sign the server accepts a deposit from
+
+	-- Pen upgrades (P4, D-026). Level 1 is free; `price` is the cost of reaching that level.
+	-- The pen is built to fit the last level from the start.
+	penLevels = {
+		{ price = 0, capacity = 8 },
+		{ price = 1000, capacity = 10 },
+		{ price = 4000, capacity = 12 },
+	} :: { { price: number, capacity: number } },
+
+	-- One-time coins on a player's first ever deposit (P4), so they can buy the first machine quickly.
+	starterDepositReward = 300,
+	purchaseRange = 14, -- max studs from a purchase sign the server accepts a purchase from
 }

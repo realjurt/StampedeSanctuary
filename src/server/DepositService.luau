@@ -2,7 +2,10 @@
 -- Deposits carried animals into the owner's pen (P3, D-025). Triggered by the pen's server-side
 -- ProximityPrompt, so no client data is trusted: the server checks ownership, distance and state,
 -- flips the records in one non-yielding update, saves, and only then starts the reveal.
--- Replies to the depositor on "DepositResult": (ok, count | reason, incomeAdded, totalIncome).
+-- Replies to the depositor on "DepositResult": (ok, count | reason, incomeAdded, totalIncome, starterReward).
+-- The very first deposit also grants EconomyConfig.starterDepositReward once (P4): the flag and the
+-- coins change in the same update as the deposit and are saved with it, so rejoining, repeated
+-- triggers or later deposits can never grant it again.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -39,13 +42,14 @@ function DepositService.check(player: Player, plot: SanctuaryBuilder.Plot): Reje
 	end
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	if not root or (root.Position - plot.penCFrame.Position).Magnitude > EconomyConfig.depositRange then
+	local sign = plot.depositPrompt.Parent :: BasePart
+	if not root or (root.Position - sign.Position).Magnitude > EconomyConfig.depositRange then
 		return "tooFar"
 	end
 	if AnimalCollection.countCarried(data) == 0 then
 		return "nothingCarried"
 	end
-	if AnimalCollection.countInPen(data) >= EconomyConfig.penCapacity then
+	if AnimalCollection.countInPen(data) >= AnimalCollection.penCapacity(data.penLevel) then
 		return "full"
 	end
 	return nil
@@ -64,9 +68,15 @@ function DepositService.deposit(player: Player, plot: SanctuaryBuilder.Plot)
 	busy[player] = true
 	local ok, err = pcall(function()
 		local deposited: { AnimalCollection.AnimalRecord } = {}
+		local reward = 0
 		-- Nothing yields inside the mutator, so the records can't change between check and flip.
 		PlayerDataService.update(player, function(data)
-			deposited = AnimalCollection.depositCarried(data, EconomyConfig.penCapacity)
+			deposited = AnimalCollection.depositCarried(data, AnimalCollection.penCapacity(data.penLevel))
+			if #deposited > 0 and not data.starterRewardClaimed then
+				data.starterRewardClaimed = true
+				reward = EconomyConfig.starterDepositReward
+				data.coins = math.min(data.coins + reward, EconomyConfig.maxCoins)
+			end
 		end, true)
 		-- Write it before showing anything. If the write fails the in-memory data stays authoritative
 		-- and is retried by the autosave and on leave; the deposit itself is never undone or repeated.
@@ -82,7 +92,7 @@ function DepositService.deposit(player: Player, plot: SanctuaryBuilder.Plot)
 				added += AnimalCollection.incomeOf(record.species)
 			end
 			PenService.reveal(player, deposited)
-			result:FireClient(player, true, #deposited, added, AnimalCollection.penIncome(data))
+			result:FireClient(player, true, #deposited, added, AnimalCollection.penIncome(data), reward)
 		end
 	end)
 	busy[player] = nil

@@ -2,7 +2,8 @@
 -- Pen presentation (P3, D-025). The server owns the pen animals and all data; this module only:
 --   • shows the deposit prompt on this player's own pen (hidden on everyone else's),
 --   • pops in freshly deposited animals with a "+$X/s" tag and idles every pen animal,
---   • shows the deposit confirmation card and "+$N" income pops over the player's own pen.
+--   • shows the deposit confirmation card and "+$N" income pops over the player's own pen,
+--   • keeps the DEPOSIT ANIMALS sign and the pen upgrade prompt current on the player's own plot (P4).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,6 +12,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
+local Format = require(ReplicatedStorage.Shared.Format)
 local UiKit = require(script.Parent.UiKit)
 
 local PenView = {}
@@ -23,35 +25,11 @@ local REJECTION_TEXT: { [string]: string } = {
 	onSafari = "Finish your safari first!",
 	tooFar = "Get closer — walk up to your pen!",
 	nothingCarried = "Tame animals on safari, then bring them here!",
-	full = `Your pen is full! ({EconomyConfig.penCapacity}/{EconomyConfig.penCapacity})`,
+	full = "Your pen is full! Upgrade it at the UPGRADE PEN sign.",
 }
 
 type Idler = { model: Model, base: CFrame, phase: number }
 local idlers: { [Model]: Idler } = {}
-
--- Floating text that rises and fades, then cleans itself up.
-local function floatText(adornee: BasePart, text: string, color: Color3, height: number)
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(160, 44)
-	billboard.StudsOffset = Vector3.new(0, height, 0)
-	billboard.LightInfluence = 0
-	billboard.AlwaysOnTop = true
-	billboard.Adornee = adornee
-	billboard.Parent = player:WaitForChild("PlayerGui")
-	local label = UiKit.label(billboard, "Text", text, 30)
-	label.Size = UDim2.fromScale(1, 1)
-	label.TextColor3 = color
-	local info = TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(billboard, info, { StudsOffset = Vector3.new(0, height + 3, 0) }):Play()
-	TweenService:Create(label, info, { TextTransparency = 1 }):Play()
-	local stroke = label:FindFirstChildOfClass("UIStroke")
-	if stroke then
-		TweenService:Create(stroke, info, { Transparency = 1 }):Play()
-	end
-	task.delay(1.25, function()
-		billboard:Destroy()
-	end)
-end
 
 -- Grows the animal from nothing with a bounce, then shows its income.
 local function reveal(model: Model)
@@ -74,7 +52,7 @@ local function reveal(model: Model)
 	tween:Play()
 	local income = model:GetAttribute("Income")
 	local rootHeight = model:GetAttribute("RootHeight")
-	floatText(root, `+${income}/s`, UiKit.PALETTE.green.top, (if typeof(rootHeight) == "number" then rootHeight else 3) + 4)
+	UiKit.floatText(root, `+${income}/s`, UiKit.PALETTE.green.top, (if typeof(rootHeight) == "number" then rootHeight else 3) + 4)
 end
 
 local function track(model: Model)
@@ -103,13 +81,13 @@ local function watchPlot(plot: Instance)
 end
 
 -- Big centred confirmation in the reference style.
-local function showConfirmation(count: number, added: number, total: number)
+local function showConfirmation(count: number, added: number, total: number, reward: number)
 	local gui = UiKit.screen("DepositConfirm", 20)
 	local card = Instance.new("Frame")
 	card.Name = "Card"
 	card.AnchorPoint = Vector2.new(0.5, 0)
 	card.Position = UDim2.new(0.5, 0, 0, 215) -- below toasts
-	card.Size = UDim2.fromOffset(440, 118)
+	card.Size = UDim2.fromOffset(440, if reward > 0 then 160 else 118)
 	card.Parent = gui
 	UiKit.surface(card, "green", 12, 4)
 	UiKit.autoScale(card)
@@ -120,36 +98,59 @@ local function showConfirmation(count: number, added: number, total: number)
 	detail.Position = UDim2.fromOffset(0, 64)
 	detail.Size = UDim2.new(1, 0, 0, 36)
 	detail.TextColor3 = UiKit.PALETTE.yellow.top
+	if reward > 0 then
+		local bonus = UiKit.label(card, "Bonus", `🎁 STARTER BONUS +{Format.money(reward)}!`, 28)
+		bonus.Position = UDim2.fromOffset(0, 104)
+		bonus.Size = UDim2.new(1, 0, 0, 40)
+		bonus.TextColor3 = UiKit.WHITE
+	end
 	UiKit.popIn(card)
-	local hold = count * EconomyConfig.depositRevealInterval + 1.8
+	local hold = count * EconomyConfig.depositRevealInterval + (if reward > 0 then 3.2 else 1.8)
 	task.delay(hold, function()
 		UiKit.popOut(card)
 		task.delay(0.2, function()
 			gui:Destroy()
 		end)
+		if reward > 0 then
+			UiKit.toast("💡 Buy a Training Machine on your plot to train ⚡ stamina!", 5)
+		end
 	end)
 end
 
--- Own pen: the prompt is visible only while carrying animals and not on safari; others' are hidden.
+local function numberAttribute(instance: Instance, name: string, fallback: number): number
+	local value = instance:GetAttribute(name)
+	return if typeof(value) == "number" then value else fallback
+end
+
+-- Own pen: the deposit prompt shows only while carrying animals and not on safari, the upgrade prompt
+-- until the pen is maxed; the sign shows what's waiting. Other players' prompts are hidden.
 local function bindPrompts(plots: Instance, myPlotId: number?)
 	for _, plot in plots:GetChildren() do
-		local prompt = plot:WaitForChild("PenGround"):WaitForChild("DepositPrompt") :: ProximityPrompt
+		local sign = plot:WaitForChild("DepositSign")
+		local prompt = sign:WaitForChild("DepositPrompt") :: ProximityPrompt
+		local upgradePrompt = plot:WaitForChild("PenUpgradeSign"):WaitForChild("PenUpgradePrompt") :: ProximityPrompt
+		local status = sign:WaitForChild("Sign"):WaitForChild("Status") :: TextLabel
 		if plot:GetAttribute("PlotId") ~= myPlotId then
 			prompt.Enabled = false
+			upgradePrompt.Enabled = false
 			continue
 		end
 		local function refresh()
-			local carried = player:GetAttribute("CarriedCount")
-			local count = if typeof(carried) == "number" then carried else 0
-			local inPen = plot:GetAttribute("PenCount")
-			local penCount = if typeof(inPen) == "number" then inPen else 0
-			prompt.Enabled = count > 0 and player:GetAttribute("InSafari") ~= true
+			local count = numberAttribute(player, "CarriedCount", 0)
+			local penCount = numberAttribute(plot, "PenCount", 0)
+			local capacity = numberAttribute(plot, "PenCapacity", 8)
+			local onSafari = player:GetAttribute("InSafari") == true
+			prompt.Enabled = count > 0 and not onSafari
 			prompt.ActionText = if count == 1 then "Deposit 1 animal" else `Deposit {count} animals`
-			prompt.ObjectText = `Your pen {penCount}/{EconomyConfig.penCapacity}`
+			prompt.ObjectText = `Your pen {penCount}/{capacity}`
+			upgradePrompt.Enabled = not onSafari and upgradePrompt.ObjectText ~= ""
+			status.Text = if count > 0 then `🐾 {count} to deposit` else `Pen {penCount}/{capacity}`
 		end
 		player:GetAttributeChangedSignal("CarriedCount"):Connect(refresh)
 		player:GetAttributeChangedSignal("InSafari"):Connect(refresh)
 		plot:GetAttributeChangedSignal("PenCount"):Connect(refresh)
+		plot:GetAttributeChangedSignal("PenCapacity"):Connect(refresh)
+		upgradePrompt:GetPropertyChangedSignal("ObjectText"):Connect(refresh)
 		refresh()
 	end
 end
@@ -159,9 +160,9 @@ function PenView.start()
 	local penGround: BasePart? = nil
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local result = remotes:WaitForChild("DepositResult") :: RemoteEvent
-	result.OnClientEvent:Connect(function(ok: boolean, countOrReason: any, added: number?, total: number?)
+	result.OnClientEvent:Connect(function(ok: boolean, countOrReason: any, added: number?, total: number?, reward: number?)
 		if ok then
-			showConfirmation(countOrReason, added or 0, total or 0)
+			showConfirmation(countOrReason, added or 0, total or 0, reward or 0)
 		elseif REJECTION_TEXT[countOrReason] then
 			UiKit.toast(REJECTION_TEXT[countOrReason], 3)
 		end
@@ -169,7 +170,7 @@ function PenView.start()
 	local incomeTick = remotes:WaitForChild("IncomeTick") :: UnreliableRemoteEvent
 	incomeTick.OnClientEvent:Connect(function(amount: number)
 		if penGround and typeof(amount) == "number" then
-			floatText(penGround, `+${amount}`, UiKit.PALETTE.yellow.top, 7)
+			UiKit.floatText(penGround, `+${amount}`, UiKit.PALETTE.yellow.top, 7)
 		end
 	end)
 

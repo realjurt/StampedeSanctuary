@@ -18,20 +18,21 @@ type Plot = SanctuaryBuilder.Plot
 
 local PenService = {}
 
--- Slot grid inside the 28-stud pen: 4 across, 2 deep (capacity 8), in pen-local studs. Sized for
--- the widest (elephant ~6) and longest (~11) placeholder.
+-- Slot grid inside the 28 × 38 pen: 4 across, 3 deep (12 = last pen level), front row first, in
+-- pen-local studs. Sized for the widest (elephant ~6) and longest (~11) placeholder.
 local COLUMNS = 4
+local ROWS = 3
 local SPACING_X = 6.5
-local SPACING_Z = 13
+local SPACING_Z = 12
 
 local penOf: { [number]: Plot } = {} -- UserId → plot whose pen we filled
 local generation: { [Plot]: number } = {} -- bumped on clear so pending reveals stop
 
 local function slotCFrame(plot: Plot, slot: number): CFrame
 	local column = (slot - 1) % COLUMNS
-	local row = math.floor((slot - 1) / COLUMNS) % 2
+	local row = math.floor((slot - 1) / COLUMNS) % ROWS
 	local x = (column - (COLUMNS - 1) / 2) * SPACING_X
-	local z = (row - 0.5) * SPACING_Z
+	local z = (row - (ROWS - 1) / 2) * SPACING_Z
 	-- Faces the hub, so visitors walking past see each animal head-on.
 	return plot.penCFrame * CFrame.new(x, 0, z)
 end

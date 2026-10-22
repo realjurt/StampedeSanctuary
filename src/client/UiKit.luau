@@ -601,6 +601,30 @@ function UiKit.window(parent: Instance, title: string, color: string, size: Vect
 	}
 end
 
+-- Floating world text that rises and fades over `adornee`, then cleans itself up ("+$5", "+0.2⚡").
+function UiKit.floatText(adornee: BasePart, text: string, color: Color3, height: number)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromOffset(160, 44)
+	billboard.StudsOffset = Vector3.new(0, height, 0)
+	billboard.LightInfluence = 0
+	billboard.AlwaysOnTop = true
+	billboard.Adornee = adornee
+	billboard.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local label = UiKit.label(billboard, "Text", text, 30)
+	label.Size = UDim2.fromScale(1, 1)
+	label.TextColor3 = color
+	local info = TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(billboard, info, { StudsOffset = Vector3.new(0, height + 3, 0) }):Play()
+	TweenService:Create(label, info, { TextTransparency = 1 }):Play()
+	local stroke = label:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		TweenService:Create(stroke, info, { Transparency = 1 }):Play()
+	end
+	task.delay(1.25, function()
+		billboard:Destroy()
+	end)
+end
+
 local toastGui: ScreenGui? = nil
 
 -- Brief notification near the top of the screen.

@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local TamingConfig = require(ReplicatedStorage.Shared.Config.TamingConfig)
+local Format = require(ReplicatedStorage.Shared.Format)
 local UiKit = require(script.Parent.UiKit)
 
 local CurrencyHud = {}
@@ -88,8 +89,10 @@ function CurrencyHud.start()
 		local function refresh(animate: boolean)
 			local value = player:GetAttribute(attribute)
 			local number = if typeof(value) == "number" then value else 0
+			-- Stamina trains in fractions (P4), so it shows one decimal until it gets large.
 			local text = if attribute == "CarriedCount"
 				then `{number}/{TamingConfig.carryCapacity}`
+				elseif attribute == "Stamina" and number < 1000 then Format.stamina(number)
 				else CurrencyHud.format(number)
 			if text ~= label.Text and animate then
 				bump(label)

@@ -9,10 +9,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
+local TrainingConfig = require(ReplicatedStorage.Shared.Config.TrainingConfig)
 local AnimalCollection = require(script.Parent.AnimalCollection)
 
 -- Version history: 1 = progress flags + discovered; 2 = + coins, stamina (P1); 3 = + animals,
--- nextAnimalId (P2). Older saves load through `reconcile`, which fills anything missing with
+-- nextAnimalId (P2); 4 = + machineLevel, penLevel, starterRewardClaimed (P4). Older saves load through `reconcile`, which fills anything missing with
 -- defaults — no separate migration step.
 export type PlayerData = {
 	version: number,
@@ -25,6 +26,9 @@ export type PlayerData = {
 	stamina: number,
 	animals: { AnimalCollection.AnimalRecord }, -- see AnimalCollection
 	nextAnimalId: number,
+	machineLevel: number, -- 0 = no training machine yet (TrainingConfig.levels)
+	penLevel: number, -- 1.. (EconomyConfig.penLevels)
+	starterRewardClaimed: boolean, -- one-time first-deposit coins already granted
 }
 
 type Profile = {
@@ -41,7 +45,7 @@ local PlayerDataService = {}
 -- Studio playtests use their own store so testing (including resets) never touches live player data.
 -- The store name keeps "v1" on purpose: v2+ data lives in the same keys (see `reconcile`).
 local STORE_NAME = if RunService:IsStudio() then "PlayerData_v1_Studio" else "PlayerData_v1"
-local DATA_VERSION = 3
+local DATA_VERSION = 4
 local LOAD_ATTEMPTS = 3
 
 local store: DataStore? = nil
@@ -59,6 +63,9 @@ local function defaults(): PlayerData
 		stamina = EconomyConfig.startingStamina,
 		animals = {},
 		nextAnimalId = 1,
+		machineLevel = 0,
+		penLevel = 1,
+		starterRewardClaimed = false,
 	}
 end
 
@@ -91,6 +98,11 @@ local function reconcile(saved: any): PlayerData
 	local owner = AnimalCollection.sanitize(saved.animals, saved.nextAnimalId)
 	data.animals = owner.animals
 	data.nextAnimalId = owner.nextAnimalId
+	data.machineLevel = math.floor(sanitizeNumber(saved.machineLevel, 0, 0, #TrainingConfig.levels))
+	data.penLevel = math.floor(sanitizeNumber(saved.penLevel, 1, 1, #EconomyConfig.penLevels))
+	-- Saves from before P4 that already deposited have had their first deposit: no reward then.
+	data.starterRewardClaimed = saved.starterRewardClaimed == true
+		or (saved.starterRewardClaimed == nil and AnimalCollection.countInPen(data) > 0)
 	return data
 end
 
@@ -113,6 +125,8 @@ local function publish(player: Player, data: PlayerData)
 	player:SetAttribute("Stamina", data.stamina)
 	player:SetAttribute("CarriedCount", AnimalCollection.countCarried(data))
 	player:SetAttribute("CarriedSpecies", AnimalCollection.carriedSpecies(data))
+	player:SetAttribute("MachineLevel", data.machineLevel)
+	player:SetAttribute("PenLevel", data.penLevel)
 end
 
 local function save(player: Player)
