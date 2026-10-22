@@ -191,7 +191,54 @@ function UiKit.gloss(frame: GuiObject, strength: number?)
 	layout()
 end
 
--- Colored field: top-light vertical gradient, gloss, contour, small radius.
+-- Roblox-stud texture (L-shaped bevels) tiled over a frame and clipped to its rounded corners.
+-- Texture: assets/ui/stud.png (generator tools/make_stud.py), uploaded to Roblox.
+UiKit.STUD_IMAGE = "rbxassetid://115925519940442"
+
+local function clipGroup(frame: GuiObject, name: string): CanvasGroup
+	local existing = frame:FindFirstChild(name)
+	if existing and existing:IsA("CanvasGroup") then
+		return existing
+	end
+	local frameCorner = frame:FindFirstChildOfClass("UICorner")
+	local clip = Instance.new("CanvasGroup")
+	clip.Name = name
+	clip.BackgroundTransparency = 1
+	clip.Size = UDim2.fromScale(1, 1)
+	clip.ZIndex = Z_OVERLAY
+	clip.Parent = frame
+	UiKit.corner(clip, if frameCorner then frameCorner.CornerRadius else UDim.new(0, 8))
+	return clip
+end
+
+function UiKit.studs(frame: GuiObject, transparency: number, cell: number)
+	local clip = clipGroup(frame, "Studs")
+	local tex = Instance.new("ImageLabel")
+	tex.Name = "Texture"
+	tex.BackgroundTransparency = 1
+	tex.Size = UDim2.fromScale(1, 1)
+	tex.Image = UiKit.STUD_IMAGE
+	tex.ScaleType = Enum.ScaleType.Tile
+	tex.TileSize = UDim2.fromOffset(cell, cell)
+	tex.ImageTransparency = transparency
+	tex.Parent = clip
+end
+
+-- Darker band along the bottom edge: the chunky "lip" that makes buttons look raised.
+local function lip(frame: GuiObject)
+	local clip = clipGroup(frame, "Studs")
+	local band = Instance.new("Frame")
+	band.Name = "Lip"
+	band.BackgroundColor3 = Color3.new(0, 0, 0)
+	band.BackgroundTransparency = 0.72
+	band.BorderSizePixel = 0
+	band.AnchorPoint = Vector2.new(0, 1)
+	band.Position = UDim2.fromScale(0, 1)
+	band.Size = UDim2.new(1, 0, 0.12, 2)
+	band.Parent = clip
+end
+
+-- Colored field: top-light vertical gradient, studs, bottom lip, gloss, contour, small radius.
 function UiKit.surface(frame: GuiObject, color: string | Color3, radius: number?, contour: number?, glossy: boolean?)
 	local sw = swatch(color)
 	frame.BackgroundColor3 = Color3.new(1, 1, 1)
@@ -211,6 +258,10 @@ function UiKit.surface(frame: GuiObject, color: string | Color3, radius: number?
 	end
 	if (contour or 3) > 0 and not frame:FindFirstChildOfClass("UIStroke") then
 		UiKit.border(frame, contour or 3)
+	end
+	if not frame:FindFirstChild("Studs") then
+		UiKit.studs(frame, 0.58, 16)
+		lip(frame)
 	end
 	if glossy ~= false and not frame:FindFirstChild("Gloss") then
 		UiKit.gloss(frame)
@@ -359,6 +410,7 @@ function UiKit.inset(parent: Instance, name: string): Frame
 	f.Parent = parent
 	UiKit.corner(f, UDim.new(0, 6))
 	UiKit.border(f, 3)
+	UiKit.studs(f, 0.86, 20)
 	return f
 end
 
@@ -404,6 +456,7 @@ function UiKit.bar(parent: Instance, name: string, colors: ColorSequence, textSi
 	local gradient = Instance.new("UIGradient")
 	gradient.Color = colors
 	gradient.Parent = fill
+	UiKit.studs(fill, 0.6, 16)
 	local shine = Instance.new("Frame")
 	shine.BackgroundColor3 = Color3.new(1, 1, 1)
 	shine.BackgroundTransparency = 0.8
@@ -498,6 +551,7 @@ function UiKit.window(parent: Instance, title: string, color: string, size: Vect
 	root.Parent = holder
 	UiKit.corner(root, UDim.new(0, 8))
 	UiKit.border(root, 4)
+	UiKit.studs(root, 0.8, 22)
 
 	local header = Instance.new("Frame")
 	header.Name = "Header"
