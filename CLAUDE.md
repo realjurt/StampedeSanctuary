@@ -1,8 +1,13 @@
 # CLAUDE.md — Stampede Sanctuary code repo
 
-The full operating manual (role, workflow, approvals, testing, docs rules) is in the Obsidian vault:
-`C:\Users\halll\OneDrive\Desktop\roblox development\Roblox Development\CLAUDE.md`
-Read it at session start. Project status: `...\Stampede Sanctuary\00 - Project Dashboard.md` and `16 - Session Handoff.md`. Only open other vault notes when the task needs them.
+The full operating manual (role, workflow, approvals, testing, docs rules) is in the Obsidian vault inside this repo:
+`vault/CLAUDE.md`
+Read it at session start. Project status: `vault/Stampede Sanctuary/00 - Project Dashboard.md` and `16 - Session Handoff.md`. Only open other vault notes when the task needs them.
+
+## Two-computer sync (Windows PC + Mac)
+- Code and notes sync through the private GitHub repo `realjurt/StampedeSanctuary`. Paths are repo-relative; never hard-code machine paths.
+- Session start: `git pull`. Session end: commit and push code **and** doc updates (pushing needs the user's OK).
+- The old OneDrive vault copy is a frozen backup — never edit it.
 
 ## This repo
 - Rojo 7.4.4 (via `aftman.toml`). Mapping in `default.project.json`:

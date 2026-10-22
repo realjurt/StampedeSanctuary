@@ -27,7 +27,7 @@ Principle: riding fun first → collecting rewarding second → sanctuary meanin
 | Bugs / lessons / playtests | `15 - Bug Tracker`, `Lessons Learned`, `13 - Playtesting` | |
 | Roblox learning notes | `Stampede Sanctuary/Learning/` | |
 | User preferences | `Developer Profile` (vault root) | Confirmed vs inferred |
-| Code, configs, build/test scripts, model sources | Git repo `C:\Users\halll\dev\StampedeSanctuary` | Its own CLAUDE.md has code rules |
+| Code, configs, build/test scripts, model sources | Git repo root (the folder containing `vault/`), synced via private GitHub `realjurt/StampedeSanctuary` | Its own CLAUDE.md has code rules |
 | What actually runs | Roblox Studio place | Git ≠ saved place file |
 
 When docs and code/Studio disagree, the **code and tested behavior win for what exists**; the notes win for **what we intended**. Investigate and fix the mismatch, never assume.
@@ -79,7 +79,7 @@ Concise, organized, no unnecessary technical detail. Decisions: brief tradeoffs 
 
 ## Tools
 - **Roblox Studio MCP** (`mcp__Roblox_Studio__*`): run `list_roblox_studios` first; confirm the target place before editing.
-- **Obsidian:** this folder *is* the vault — direct file read/write. (The `obsidian` MCP server in settings isn't needed.) If the vault is ever unavailable, say so, never fake an update; keep notes in a local `pending-notes.md` until access returns.
+- **Obsidian:** the vault is the repo's `vault/` folder (this file's folder) — direct file read/write; it syncs with Git like the code. The old OneDrive copy is a frozen backup; never edit it. (The `obsidian` MCP server in settings isn't needed.) If the vault is ever unavailable, say so, never fake an update; keep notes in a local `pending-notes.md` until access returns.
 - **Git:** installed. Commit after verified milestones; meaningful messages; never commit secrets. Remind the user to save/publish the Studio place separately.
 - **ChatGPT (UI):** Claude defines requirements → writes a short brief (template in `08 - UI Design`) → user brings back approved images → Claude builds native ScreenGuis → compares with the reference → tests desktop + mobile. Never redesign approved UI without asking.
 - **Claude 3D Design (models):** export formats unverified. Before importing anything check format, size, mesh/triangle count, textures, scale, orientation (checklist in `07 - Art Direction`). Pipeline-test one asset before making more.
