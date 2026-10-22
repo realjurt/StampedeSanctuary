@@ -211,6 +211,7 @@ FreeRideConfig.camera = {
 	speedFov = 14, -- extra FOV at top speed
 	followDelay = 1, -- seconds after a manual camera drag before it eases back behind the animal
 	followRate = 3, -- how fast it eases back (per second, scaled by speed)
+	heightFollowRate = 8, -- how fast the camera's aim follows height changes (steps, jumps, landings)
 	dragSensitivity = 0.4, -- degrees per pixel (mouse / touch)
 	stickSensitivity = 160, -- degrees per second at full right stick
 	minPitch = -10,

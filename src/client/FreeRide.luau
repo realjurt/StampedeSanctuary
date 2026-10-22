@@ -52,6 +52,7 @@ local cameraYaw = 0
 local cameraPitch = 14
 local cameraZoom = 0 -- mouse-wheel offset from the species' distance
 local cameraPosition: Vector3? = nil
+local focusY: number? = nil
 local lastCameraInput = -math.huge
 local fov = CAMERA.baseFov
 local shake = 0
@@ -104,8 +105,11 @@ local function updateCamera(dt: number)
 		cameraYaw = wrapAngle(cameraYaw + wrapAngle(mount.heading - cameraYaw) * math.min(rate * dt, 1))
 	end
 
-	local root = mount.agent.root.Position
-	local focus = root + Vector3.new(0, 3 + handling.cameraHeight, 0) + forwardOf(mount.heading) * CAMERA.lookAhead * speedFraction
+	-- Aim at the animal's path, not its bobbing body; ease the height so steps and landings don't jolt.
+	local targetY = mount.position.Y + mount.agent.rootHeight + 3 + handling.cameraHeight
+	focusY = if focusY then focusY + (targetY - focusY) * math.min(dt * CAMERA.heightFollowRate, 1) else targetY
+	local focus = Vector3.new(mount.position.X, focusY, mount.position.Z)
+		+ forwardOf(mount.heading) * CAMERA.lookAhead * speedFraction
 	local rotation = CFrame.Angles(0, cameraYaw, 0) * CFrame.Angles(-math.rad(cameraPitch), 0, 0)
 	local distance = math.clamp(handling.cameraDistance + cameraZoom, 10, 34)
 	local desired = focus + rotation:VectorToWorldSpace(Vector3.new(0, CAMERA.height * 0.3, distance))
@@ -226,6 +230,7 @@ local function mount(target: FreeRideMotion.Mount)
 
 	target:settle()
 	cameraYaw, cameraPitch, cameraPosition, lastCameraInput, shake = target.heading, 14, nil, -math.huge, 0
+	focusY = nil
 	fov = Workspace.CurrentCamera.FieldOfView
 	setPromptsEnabled(false)
 
@@ -330,7 +335,9 @@ function FreeRide.start()
 		spawnPracticeAnimal(entry.species, entry.spawn)
 	end
 	refreshFilter() -- LocalAnimals exists now
-	RunService.PreSimulation:Connect(onStep)
+	-- Once per rendered frame, just before the camera: physics steps in fixed 1/240 s slices, so
+	-- stepping in PreSimulation moved the animal unevenly from frame to frame (visible camera shake).
+	RunService:BindToRenderStep("FreeRideStep", Enum.RenderPriority.Camera.Value, onStep)
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputChanged:Connect(onInputChanged)
 	UserInputService.InputEnded:Connect(onInputEnded)
